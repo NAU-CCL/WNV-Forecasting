@@ -1,0 +1,4429 @@
+library(tidyr)
+library(scales)
+library(tidyverse)
+library(readr)
+library(readxl)
+library(mgcv)
+library(ciTools)
+library(ggplot2)
+library(gridExtra)
+library(dplyr)
+library(MASS)
+library(purrr)
+# Model Parameters
+time_initial <- 1
+time_final <- 52
+dt <- 1
+time_vector <- seq(time_initial, time_final, by = 1)
+N <- 8000  # Number of ensemble
+#sig_2 <- 0.5  
+mu1 <- 1/120 #0.12 #JOE mistake? (this is bird death)
+mu <- 0.05 #0.12 #JOE mistake (this is mosquito death)
+#mu2 <- 0.00004
+#Vh <- 3823609
+#brim <- 0.0001 
+i_year <- c(
+  "2006" = 100,
+  "2007" = 100,
+  "2008" = 100,
+  "2009" = 100,
+  "2010" = 100,
+  "2011" = 100,
+  "2012" = 25,
+  "2013" = 25,
+  "2014" = 100,
+  "2015" = 50,
+  "2016" = 50,
+  "2017" = 50,
+  "2018" = 100,
+  "2019" = 50,
+  "2020" = 50,
+  "2021" = 50
+)
+
+
+brim <- vector("numeric", length = 365)
+for(i in 1:365){
+   if(i >= as.numeric(i_year[as.character(Year)]) & i <= 180) brim[i] = 0.01
+  }
+
+# JOE
+# OU Process func
+
+OUproc_func = function(this_prev, mu, lambda, sigma, dt=1){
+  # Random variate
+  temp_rand = rnorm(length(this_prev))
+  
+  # Calc next value
+  this_next = exp(
+    log(this_prev) * exp(-lambda * dt) -
+      mu * (exp(-lambda * dt) - 1) + 
+      sigma * sqrt(1 - exp(-2 * lambda * dt)) * temp_rand
+  )
+  
+  return(this_next)
+}
+
+# JOE
+# OU params
+ou_mu_vm = log(1.0) # log scale
+ou_lambda_vm = 1 / 14
+
+sigma_vm_year <- c(
+  "2006" = 1.10,
+  "2007" = 1.50,
+  "2008" = 1.10,
+  "2009" = 1.50,
+  "2010" = 1.10,
+  "2011" = 1.50,
+  "2012" = 1.50,
+  "2013" = 1.10,
+  "2014" = 1.10,
+  "2015" = 1.10,
+  "2016" = 1.10,
+  "2017" = 1.10,
+  "2018" = 1.50,
+  "2019" = 1.50,
+  "2020" = 0.50,
+  "2021" = 2.00
+)
+
+ou_sigma_vm = as.numeric(sigma_vm_year[as.character(Year)])
+
+
+#ou_mu_r = log(0.001);
+ou_lambda_r = 1 / 14;
+#ou_sigma_r = 0.9;
+
+# Time points
+# time_points <- seq(1, 365, by = 1)
+# #2021 climate data
+# # Read temperature and precipitation data
+# T_temp <- read.csv("./county_temp_2020-2024.csv")
+# column_name <- "rowMeans.combined_temp..na.rm...TRUE."
+# inputTem_i  <- as.numeric(T_temp[[column_name]])
+# #inputTem_i  <-inputTem_i[1462:1827]
+# inputTem_i  <-inputTem_i[367:731]
+# P_temp <- read.csv("./county_prcp_2021-2024.csv")
+# #P_temp <- read.csv("./county_prcp_2017.csv")
+# column_name <- "rowMeans.combined_p..na.rm...TRUE."
+# inputP_i <- as.numeric(P_temp[[column_name]])
+# inputP_i <-inputP_i[1:365]
+# #inputP_i <-inputP_i[1096:1461]
+
+#2014 climate data
+T_temp <- read.csv("./county_temp.csv")
+column_name <- "rowMeans.combined_temp..na.rm...TRUE."
+inputTem_i  <- as.numeric(T_temp[[column_name]])
+inputTem_i  <-inputTem_i[1:365]
+P_temp <- read.csv("./county_prcp.csv")
+column_name <- "rowMeans.combined_p..na.rm...TRUE."
+inputP_i <- as.numeric(P_temp[[column_name]])
+inputP_i <-inputP_i[1:365]
+
+
+# Function to adjust temperature based on parameters
+inputTem <- function(time_points, par, inputT) {
+  temp <- inputT[time_points]
+  if (is.na(temp) || temp < par[1] || temp > par[2]) {
+    return(par[1])
+  } else {
+    return(temp)
+  }
+}
+
+# Function to return precipitation
+inputP <- function(time_points, inputP) {
+  return(inputP[time_points])
+}
+
+# Initial parameters
+# par_input <- c(Tmi = 18.95, Tma = 45.22, alpha = 1.48, phi = 1.37,
+#                Tmb = 0.5, d = 230.3, Tbm = 0.12, gamma = 0.15, tau = 400.2, 
+#                Vb = 0.5, Tmh = 0.025, psi = 0.07)
+# WNV Model Function
+WNV_model <- function(sirWNV_ensemble, Vm_t, r_t, T_temp, P_temp, par_input, week) {
+  # Extract state variables
+  
+  #if(week %in% c(26)){yes_debug = 1}else{yes_debug = 0}
+  yes_debug = 0
+  
+  Sm <- sirWNV_ensemble[1, ]
+  Im <- sirWNV_ensemble[2, ]
+  Sb <- sirWNV_ensemble[3, ]
+  Ib <- sirWNV_ensemble[4, ]
+  Rb <- sirWNV_ensemble[5, ]
+  Sh <- sirWNV_ensemble[6, ]
+  Eh <- sirWNV_ensemble[7, ]
+  Ih <- sirWNV_ensemble[8, ]
+  
+  if(yes_debug){
+    cat("Im_inside", Im, "\n")
+  }
+  # Parameters
+  par <- c(Tmi = par_input[1], Tma = par_input[2], alpha = par_input[3], phi = par_input[4],
+           Tmb = par_input[5], d = par_input[6], Tbm = par_input[7],
+           gamma = par_input[8], tau = par_input[9], Vb = par_input[10],
+           Tmh = par_input[11], psi = par_input[12])
+  
+  # Get week indices
+  week_correct <- week - 1
+  indx1 <- 7 * week_correct + 1
+  indx2 <- indx1 + 6
+  indx_range <- c(indx1:indx2)
+  
+  # Check if T_temp and P_temp are already 7-element vectors or full vectors
+  if (length(T_temp) == 7 && length(P_temp) == 7) {
+    # FORECASTING MODE: Already have the 7 values we need
+    T_temp_week <- T_temp
+    P_temp_week <- P_temp
+    #cat("Using pre-computed 7-day T_temp:", T_temp_week, "\n")
+  } else {
+    # FITTING MODE: Extract the 7 days from full vectors
+    T_temp_week <- as.numeric(sapply(indx_range, function(t) {
+      if (t > length(T_temp)) {
+        return(par["Tmi"])  # Default if out of bounds
+      }
+      inputTem(t, par, T_temp)
+    }))
+    P_temp_week <- as.numeric(sapply(indx_range, function(t) {
+      if (t > length(P_temp)) {
+        return(0)  # Default if out of bounds
+      }
+      inputP(t, P_temp)
+    }))
+  }
+  
+  # Calculate t_temp and brim_temp for this week
+  t_temp <- ((indx_range - 1) %% 365) + 1
+  
+  # Handle brim_temp safely
+  if (indx1 <= 365 && indx2 <= 365) {
+    brim_temp <- brim[indx1:indx2]
+  } else {
+    brim_temp <- rep(0, 7)  # Default if out of bounds
+  }
+  
+  if(yes_debug){
+    cat("brim_inside:", brim_temp[1], "\n")
+  }
+  
+  # Daily iteration within the week
+  for (i in 1:7) {
+    if(yes_debug){
+      cat("day:", i, "\n")
+    }
+    Nb <- ifelse((Sb + Ib + Rb < 0), 0, (Sb + Ib + Rb))
+    Nh <- ifelse((Sh + Eh + Ih < 0), 0, (Sh + Eh + Ih))
+    
+    # Handle NA values
+    Nb <- ifelse(is.na(Nb), 0, Nb)
+    Nh <- ifelse(is.na(Nh), 0, Nh)
+    
+    # Mosquito dynamics
+    if (is.na(Nb) || Nb == 0) {
+      temp_growth1 <- 0
+    } else {
+      temp_growth1 <- r_t[i] * par["Tmb"] * Ib * Sm / Nb #changed here to accept daily values of r_t
+    }
+    
+    if(yes_debug){
+      cat("growth1_inside", temp_growth1, "\n")
+      cat("rt_inside", r_t, "\n")
+    }
+    
+    
+    dSm <- (Vm_t[i] * (-(T_temp_week[i] - par["Tmi"]) * (T_temp_week[i] - par["Tma"])) *
+              1 / (1 + exp(par["alpha"] - par["phi"] * P_temp_week[i])) -
+              temp_growth1 - mu * Sm) * dt  #changed here to accept daily values of Vm_t
+    
+    dIm <- (temp_growth1 - mu * Im + brim_temp[i]) * dt
+    if(yes_debug){
+      cat("dIm_inside", dIm, "\n")
+    }
+    
+    # Bird dynamics
+    if (is.na(Nb) || Nb == 0) {
+      temp_growth2 <- 0
+    } else {
+      temp_growth2 <- r_t[i] * par["Tbm"] * Im * Sb / Nb  #changed here to accept daily values of r_t
+    }
+    #JOE: mistake 'mu1'
+    dSb <- (10 * par["Vb"] * exp(-0.5 * (t_temp[i] - par["d"])^2 / par["tau"]) -
+              temp_growth2 - mu1 * Sb) * dt
+    # JOE: I'm removing mu1 from dIb 
+    #dIb <- (temp_growth2 - (mu1 + par["gamma"]) * Ib) * dt
+    dIb <- (temp_growth2 - (par["gamma"]) * Ib) * dt
+    dRb <- (par["gamma"] * Ib - mu1 * Rb) * dt
+    #dRb <- (par["gamma"] * Ib) * dt
+    
+    # Human dynamics
+    if (is.na(Nh) || Nh == 0) {
+      dSh <- 0
+      dEh <- 0
+    } else {
+      dSh <- (-r_t[i] * par["Tmh"] * Im * Sh / Nh) * dt  #changed here to accept daily values of r_t
+      dEh <- (r_t[i] * par["Tmh"] * Im * Sh / Nh - par["psi"] * Eh) * dt  #changed here to accept daily values of r_t
+    }
+    dIh <- (par["psi"] * Eh) * dt
+    
+    # Update state variables (ensure non-negative)
+    Sm <- pmax(Sm + dSm, 0)
+    Im <- pmax(Im + dIm, 0)
+    Sb <- pmax(Sb + dSb, 0)
+    Ib <- pmax(Ib + dIb, 0)
+    Rb <- pmax(Rb + dRb, 0)
+    Sh <- pmax(Sh + dSh, 0)
+    Eh <- pmax(Eh + dEh, 0)
+    Ih <- pmax(Ih + dIh, 0)
+    
+    if(yes_debug){
+      cat("Im_inside_after", Im, "\n")
+    }
+    
+    # Save to ensemble
+    sirWNV_ensemble[1, ] <- Sm
+    sirWNV_ensemble[2, ] <- Im
+    sirWNV_ensemble[3, ] <- Sb
+    sirWNV_ensemble[4, ] <- Ib
+    sirWNV_ensemble[5, ] <- Rb
+    sirWNV_ensemble[6, ] <- Sh
+    sirWNV_ensemble[7, ] <- Eh
+    sirWNV_ensemble[8, ] <- Ih
+  }
+  
+  return(sirWNV_ensemble)
+}
+
+# Observation data 2021
+# #mosq_pools_agg <- read.csv("./Downloads/mosq_pools_agg.csv")
+# mosq_pools_agg <- read.csv("./mosq_pools_agg_2021.csv")
+# #X_obs <- mosq_pools_agg$sum_cluster_Abund[1:52] #total mosquito abundance data
+# #X_obs = X_obs
+# X_obs <- as.numeric(mosq_pools_agg$Tot_Mosq_Abund)
+# mosq_pools_data <- read.csv("./mosq_pools_data_2021.csv")
+# #X2_obs = mosq_pools_data %>% filter(Year == 2014)
+# #X2_obs = as.numeric(c(X2_obs$Inf_Mosq_Per_1000,0)) #Inf_Mosq_Per_1000 data
+# X2_obs = as.numeric(mosq_pools_data$Inf_Mosq_Per_1000)
+# WNV_humans_summary3 <- read.csv("./WNV_humans_summary3.csv")
+# X3_obs = WNV_humans_summary3 %>% filter(YEAR == 2021)
+# X3_obs = X3_obs[-1,]
+# X3_obs = as.numeric(X3_obs$cases)
+# X3_obs <- cumsum(X3_obs)
+
+
+# Observation data 2014
+mosq_pools_agg <- read.csv("./Downloads/mosq_pools_agg.csv")
+X_obs <- mosq_pools_agg$sum_cluster_Abund[1:51] #total mosquito abundance data
+X_obs = as.numeric(c(X_obs,0))
+mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+X2_obs = mosq_pools_data %>% filter(Year == 2014)
+X2_obs = as.numeric(c(X2_obs$Inf_Mosq_Per_1000,0)) #Inf_Mosq_Per_1000 data
+
+WNV_humans_summary3 <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+X3_obs = WNV_humans_summary3 %>% filter(YEAR == 2014)
+X3_obs = X3_obs[-1,]
+X3_obs = as.numeric(X3_obs$cases)
+X3_obs <- cumsum(X3_obs)
+
+X0_obs = X3_obs #human
+X_obs1 = X_obs #abund
+X_obs2 = X2_obs #infm1000
+
+
+pop <- read.csv("./maricopa_population_2006-2021.csv")
+# ====================================================================
+# Sequential WNV Ensemble Kalman Filter
+# ====================================================================
+{
+# Define parameters
+num_iterations <- 46
+results <- list()
+#date_gam <- seq(as.Date("2021-01-01"), as.Date("2021-12-28"), by = "week")
+#date_gam <- seq(as.Date("2014-01-01"), as.Date("2014-12-28"), by = "week")
+# Updated observation noise covariance
+R <- diag(c(5.0, 0.001, 0.05)) #JOE
+
+# ====================================================================
+# Initialize storage OUTSIDE the iteration loop (GLOBAL)
+# ====================================================================
+total_time_points <- num_iterations + 4
+
+# Storage for ensemble outputs
+save_vm_ensemble_global <- matrix(0, nrow = N, ncol = total_time_points)
+save_rt_ensemble_global <- matrix(0, nrow = N, ncol = total_time_points)
+predicted_global <- matrix(0, nrow = N, ncol = total_time_points)
+predicted2_global <- matrix(0, nrow = N, ncol = total_time_points)
+predicted3_global <- matrix(0, nrow = N, ncol = total_time_points)
+predicted_Sm_global <- matrix(0, nrow = N, ncol = total_time_points)
+predicted_Im_global <- matrix(0, nrow = N, ncol = total_time_points)
+predicted_Sh_global <- matrix(0, nrow = N, ncol = total_time_points)
+predicted_Eh_global <- matrix(0, nrow = N, ncol = total_time_points)
+predicted_Ih_global <- matrix(0, nrow = N, ncol = total_time_points)
+
+save_log_vm_ensemble_global <- matrix(0, nrow = N, ncol = total_time_points)
+save_log_rt_ensemble_global <- matrix(0, nrow = N, ncol = total_time_points)
+
+# Full ensemble storage (22 state variables + parameters)
+save_ensemble_full_global <- array(0, dim = c(22, N, total_time_points))
+static2_global <- array(0, dim = c(12, N, total_time_points))
+static_global <- matrix(0, nrow = 12, ncol = N)
+# Diagnostics
+#scale_factor_history <- numeric(total_time_points)
+sigma_t_history <- numeric(total_time_points)
+
+# ====================================================================
+# Initialize ensemble ONCE before the loop
+# ====================================================================
+Sm_init <- 7
+Im_init <- 0
+Ib_init <- 0
+Rb_init <- 0
+Sb_init <- 0
+Nh <- as.numeric(pop %>% 
+                   filter(year == Year) %>% 
+                   pull(population))
+Eh_init <- 0
+Ih_init <- 0
+Sh_init <- Nh - Eh_init - Ih_init
+
+# State variables
+Sm_init_particles <- rep(Sm_init, N)
+Im_init_particles <- rep(Im_init, N)
+Sb_init_particles <- rep(Sb_init, N)
+Ib_init_particles <- rep(Ib_init, N)
+Rb_init_particles <- rep(Rb_init, N)
+Sh_init_particles <- rep(Sh_init, N)
+Eh_init_particles <- rep(Eh_init, N)
+Ih_init_particles <- rep(Ih_init, N)
+
+# Time-varying parameters (log-transformed)
+Vm_t_particles <- runif(N, min = 0.0001, max = 2)
+log_Vm_t_particles <- log(Vm_t_particles)
+r_t_particles <- runif(N, min = 0.0001, max = 0.001)
+log_r_t_particles <- log(r_t_particles)
+
+# Static parameters
+Tmi_particles <- runif(N, min = 17, max = 20)
+Tma_particles <- runif(N, min = 42, max = 48)
+alpha_particles <- runif(N, min = 0.7, max = 1.8)
+phi_particles <- runif(N, min = 0.95, max = 1.8)
+Tmb_particles <- runif(N, min = 0.140, max = 0.55)
+d_particles <- runif(N, min = 180, max = 200)
+Tbm_particles <- runif(N, min = 0.140, max = 0.55)
+#Joe CHECK
+gamma_particles <- runif(N, min = 0.1, max = 0.2)
+tau_particles <- runif(N, min = 300, max = 420)
+Vb_particles <- runif(N, min = 0.1, max = 0.9)
+Tmh_particles <- runif(N, min = 0.0140, max = 0.055)
+psi_particles <- runif(N, min = 0.05, max = 0.14)
+
+# Build ensemble matrix 
+ensemble <- rbind(
+  Sm_init_particles, Im_init_particles, Sb_init_particles, 
+  Ib_init_particles, Rb_init_particles, Sh_init_particles, 
+  Eh_init_particles, Ih_init_particles, log_Vm_t_particles, 
+  log_r_t_particles, Tmi_particles, Tma_particles, 
+  alpha_particles, phi_particles, Tmb_particles, 
+  d_particles, Tbm_particles, gamma_particles, 
+  tau_particles, Vb_particles, Tmh_particles, psi_particles
+)
+
+param_names <- c("Tmi", "Tma", "alpha", "phi", "Tmb", "d", 
+                 "Tbm", "gamma", "tau", "Vb", "Tmh", "psi")
+}
+# ====================================================================
+# Main iteration loop
+# ====================================================================
+
+obs_year <- c(
+  "2006" = 18,
+  "2007" = 18,
+  "2008" = 18,
+  "2009" = 18,
+  "2010" = 18,
+  "2011" = 18,
+  "2012" = 5,
+  "2013" = 5,
+  "2014" = 18,
+  "2015" = 10,
+  "2016" = 10,
+  "2017" = 10,
+  "2018" = 18,
+  "2019" = 10,
+  "2020" = 10,
+  "2021" = 10
+)
+# Daily OU storage: 350 days = 50 weeks x 7 days
+total_days <- (num_iterations + 4) * 7   # 50 x 7 = 350
+
+save_vm_daily_global <- matrix(0, nrow = N, ncol = total_days)
+save_rt_daily_global <- matrix(0, nrow = N, ncol = total_days)
+
+for (iteration in 1:num_iterations) {
+  
+  print(paste("Iteration:", iteration))
+  print(paste("In the fit section"))
+  # Determine which observations to process
+  if (iteration == 1) {
+    obs_indices <- 1:5
+  } else {
+    obs_indices <- (iteration + 4)
+  }
+  
+  # Get training data up to this point
+  X_obs1_train <- as.numeric(X_obs1[1:(iteration + 4)])
+  X_obs2_train <- as.numeric(X_obs2[1:(iteration + 4)])
+  X0_obs_train <- as.numeric(X0_obs[1:(iteration + 4)])
+  
+  # ====================================================================
+  # Process only the new observation(s)
+  # ====================================================================
+  for (obs_index in obs_indices) {
+    
+    week <- ceiling(obs_index)
+    
+    # ============================================
+    # Forecast step
+    # ============================================
+    # for (i in 1:N) {
+    #   Vm <- as.numeric(exp(ensemble[9, i]))
+    #   r <- as.numeric(exp(ensemble[10, i]))
+    #   par <- as.numeric(ensemble[11:22, i])
+    #   
+    #   # if(iteration %in% c(32)){
+    #   #   cat("Im_fit_before:", ensemble[2, i], "\n")
+    #   # }
+    #   
+    #   # Run WNV model
+    #   sirWNV_output <- WNV_model(
+    #     ensemble[1:8, i, drop = FALSE],
+    #     Vm_t = Vm, r_t = r, 
+    #     T_temp = inputTem_i,  P_temp= inputP_i, 
+    #     par_input = par, week = week
+    #   )
+    #   
+    #   ensemble[1:8, i] <- sirWNV_output
+    #   
+    #   # if(iteration %in% c(32)){
+    #   #   cat("Im_fit_after:", ensemble[2, i], "\n")
+    #   # }
+    # }
+    
+    # ============================================
+    # Analysis/Update step
+    # ============================================
+    
+    # Add process noise to log(Vm)
+    # JOE:
+    #log_Vm_t_particles <- ensemble[9, ] + 0.9 * rnorm(N)
+    # Vm_t_particles = OUproc_func(exp(ensemble[9, ]),
+    #                              mu = ou_mu_vm,
+    #                              lambda = ou_lambda_vm,
+    #                              sigma = ou_sigma_vm)
+    # log_Vm_t_particles = log(Vm_t_particles)
+    # 
+    # ensemble[9, ] <- log_Vm_t_particles
+    # 
+    # #JOE:
+    # # Time-varying sigma for log(r)
+    # 
+    # if (obs_index<as.numeric(obs_year[as.character(Year)])) {#adjust when you observe data earlier for 2020, 2017, 2016, 10 0thers 18, 2019 0
+    #   #print(obs_index)
+    #   ou_sigma_r <- 0.002
+    #   ou_mu_r = log(0.001)
+    # } else {
+    #   ou_sigma_r <- 1.50
+    #   ou_mu_r = log(0.05)
+    # }
+    # 
+    # # Adaptive scaling based on observations
+    # # JOE: unnecessary scale_factor here
+    # # scale_factor <-  5
+    # 
+    # 
+    # # Store diagnostics
+    # #scale_factor_history[obs_index] <- scale_factor
+    # sigma_t_history[obs_index] <- ou_sigma_r
+    # 
+    # # Add process noise to log(r)
+    # #JOE:
+    # #log_r_t_particles <- ensemble[10, ] + sigma_t * rnorm(N)
+    # r_t_particles = OUproc_func(exp(ensemble[10, ]),
+    #                              mu = ou_mu_r,
+    #                              lambda = ou_lambda_r,
+    #                              sigma = ou_sigma_r)
+    # log_r_t_particles = log(r_t_particles)
+    # ensemble[10, ] <- log_r_t_particles
+    # === Generate daily Vm_t and r_t for the current week (7 days) ===
+    current_Vm <- exp(ensemble[9, ])      # N ensemble members
+    current_rt <- exp(ensemble[10, ])
+    
+    Vm_daily <- matrix(NA, nrow = N, ncol = 7)   # rows = ensemble, cols = days
+    rt_daily  <- matrix(NA, nrow = N, ncol = 7)
+    
+    for (day in 1:7) {
+      # Daily OU step for Vm
+      current_Vm <- OUproc_func(current_Vm,
+                                mu = ou_mu_vm,
+                                lambda = ou_lambda_vm,
+                                sigma = ou_sigma_vm,
+                                dt = 1)
+      Vm_daily[, day] <- current_Vm
+      
+      # Daily OU step for r_t (adaptive sigma)
+      if (obs_index < as.numeric(obs_year[as.character(Year)])) {
+        ou_sigma_r_day <- 0.002
+        ou_mu_r_day    <- log(0.001)
+      } else {
+        ou_sigma_r_day <- 1.50
+        ou_mu_r_day    <- log(0.05)
+      }
+      sigma_t_history[obs_index] <- ou_sigma_r_day
+      current_rt <- OUproc_func(current_rt,
+                                mu = ou_mu_r_day,
+                                lambda = ou_lambda_r,
+                                sigma = ou_sigma_r_day,
+                                dt = 1)
+      rt_daily[, day] <- current_rt
+      
+      # ── Store daily values into global matrices ──────────────────
+      # Global day index: each obs_index covers 7 days
+      day_global <- (obs_index - 1) * 7 + day
+      save_vm_daily_global[, day_global] <- current_Vm
+      save_rt_daily_global[, day_global] <- current_rt
+    }
+    
+    # Put the **last** daily value back into the ensemble for storage/Kalman update
+    ensemble[9, ]  <- log(current_Vm)
+    ensemble[10, ] <- log(current_rt)
+    
+    # Now run the model using the **full daily series** for this week
+    for (i in 1:N) {
+      Vm_vec <- Vm_daily[i, ]      # length 7
+      rt_vec <- rt_daily[i, ]      # length 7
+      
+      sirWNV_output <- WNV_model(
+        ensemble[1:8, i, drop = FALSE],
+        Vm_t = Vm_vec,          # ← now a vector of 7 daily values
+        r_t  = rt_vec,          # ← now a vector of 7 daily values
+        T_temp = inputTem_i, 
+        P_temp = inputP_i, 
+        par_input = as.numeric(ensemble[11:22, i]),
+        week = week
+      )
+      
+      ensemble[1:8, i] <- sirWNV_output
+    }
+    # Apply thresholds
+    tmp_Sm <- ensemble[1, ]
+    tmp_Im <- ensemble[2, ]
+    tmp_Ih <- ensemble[8, ]
+    tmp_Im <- ifelse(tmp_Im < 1, 0, tmp_Im)
+    tmp_Ih <- ifelse(tmp_Ih < 1, 0, tmp_Ih)
+    ensemble[1, ] <- tmp_Sm
+    ensemble[2, ] <- tmp_Im
+    ensemble[8, ] <- tmp_Ih
+    
+    # Prepare observations
+    scalar_value <- 10
+    Sm <- tmp_Sm / scalar_value
+    Im <- tmp_Im / scalar_value
+    Ih <- tmp_Ih
+    
+    Sm_observed <- as.numeric((1 - X_obs2_train[obs_index] / 1000) * 
+                                (X_obs1_train[obs_index] / scalar_value))
+    Im_observed <- as.numeric((X_obs2_train[obs_index] / 1000) * 
+                                (X_obs1_train[obs_index] / scalar_value))
+    Ih_observed <- as.numeric(X0_obs_train[obs_index])
+    observation <- matrix(c(Sm_observed, Im_observed, Ih_observed), ncol = 1)
+    
+    # Observation ensemble
+    obs_ensemble <- rbind(Sm, Im, Ih)
+    obs_mean <- rowMeans(obs_ensemble)
+    
+    # Covariances
+    Pf <- cov(t(ensemble))
+    Py <- cov(t(obs_ensemble))
+    Pxy <- cov(t(ensemble), t(obs_ensemble))
+    
+    # Observation noise covariance
+    R_temp <- matrix(0, nrow = 3, ncol = 3)
+    R_temp[1, 1] <- observation[1, 1] * R[1, 1]
+    R_temp[2, 2] <- max((observation[2, 1] * R[2, 2]), R[2, 2])
+    R_temp[3, 3] <- max((observation[3, 1] * R[3, 3]), R[3, 3])
+    
+    # Kalman gain
+    K <- Pxy %*% ginv(Py + R_temp)
+    
+    # Update ensemble
+    for (i in 1:N) {
+      obs_noise <- mvrnorm(1, mu = c(0, 0, 0), Sigma = R_temp)
+      ensemble[, i] <- ensemble[, i] + K %*% (observation - obs_ensemble[, i] + obs_noise)
+      
+      # if(iteration %in% c(32)){
+      #   cat("Im_after_innovate:", ensemble[2, i], "\n")
+      # }
+    }
+    
+    # Apply constraints
+    for (k in 1:8) {
+      ensemble[k, ] <- pmax(ensemble[k, ], 1e-6)
+    }
+    for (k in 11:22) {
+      ensemble[k, ] <- pmax(ensemble[k, ], 1e-6)
+    }
+    
+    # ============================================
+    # Store results in GLOBAL matrices
+    # ============================================
+    tmp_Sm <- ensemble[1, ]
+    tmp_Im <- ensemble[2, ]
+    tmp_Ih <- ensemble[8, ]
+    tmp_Im <- ifelse(tmp_Im < 1, 0, tmp_Im)
+    tmp_Ih <- ifelse(tmp_Ih < 1, 0, tmp_Ih)
+    ensemble[1, ] <- tmp_Sm
+    ensemble[2, ] <- tmp_Im
+    ensemble[8, ] <- tmp_Ih
+    
+    
+    
+    predicted_global[, obs_index] <- (tmp_Sm + tmp_Im)
+    predicted2_global[, obs_index] <- tmp_Im / (tmp_Sm + tmp_Im) * 1000
+    predicted3_global[, obs_index] <- tmp_Ih
+    predicted_Sm_global[, obs_index] <- tmp_Sm
+    predicted_Sh_global[, obs_index] <- ensemble[6, ]
+    predicted_Im_global[, obs_index] <- tmp_Im
+    predicted_Ih_global[, obs_index] <- tmp_Ih
+    predicted_Eh_global[, obs_index] <- ensemble[7, ]
+    
+    save_vm_ensemble_global[, obs_index] <- exp(ensemble[9, ])
+    save_rt_ensemble_global[, obs_index] <- exp(ensemble[10, ])
+    save_log_vm_ensemble_global[, obs_index] <- ensemble[9, ]
+    save_log_rt_ensemble_global[, obs_index] <- ensemble[10, ]
+    static_global[,] <- ensemble[11:22, ]
+    save_ensemble_full_global[, , obs_index] <- ensemble
+    static2_global[, , obs_index] <- ensemble[11:22, ]
+  }
+  if (iteration %in% c(46)) {
+    saveRDS(save_ensemble_full_global, file = paste0("save_ensemble_full_global_FullModel_", Year, ".rds"))
+    
+  }
+  # ============================================================
+  # Daily OU parameter plots
+  # ============================================================
+  
+  # Build daily date vector: 350 days starting Jan 1 of Year
+  # (matches the 50 weeks x 7 days = 350 days structure)
+  date_daily <- seq(
+    from = as.Date(paste0(Year, "-01-01")),
+    by   = "day",
+    length.out = total_days   # 350
+  )
+  
+  # Compute quantiles across ensemble for each day
+  vm_daily_q <- apply(
+    save_vm_daily_global[, 1:total_days], 2,
+    quantile, probs = c(0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95),
+    na.rm = TRUE
+  )
+  
+  rt_daily_q <- apply(
+    save_rt_daily_global[, 1:total_days], 2,
+    quantile, probs = c(0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95),
+    na.rm = TRUE
+  )
+  
+  df_vm_daily <- data.frame(
+    Date = date_daily,
+    q05  = vm_daily_q[1, ], q10 = vm_daily_q[2, ], q25 = vm_daily_q[3, ],
+    q50  = vm_daily_q[4, ],
+    q75  = vm_daily_q[5, ], q90 = vm_daily_q[6, ], q95 = vm_daily_q[7, ]
+  )
+  
+  df_rt_daily <- data.frame(
+    Date = date_daily,
+    q05  = rt_daily_q[1, ], q10 = rt_daily_q[2, ], q25 = rt_daily_q[3, ],
+    q50  = rt_daily_q[4, ],
+    q75  = rt_daily_q[5, ], q90 = rt_daily_q[6, ], q95 = rt_daily_q[7, ]
+  )
+  
+  # ---- Plot Vm_t daily ----
+  p_vm_daily <- ggplot(df_vm_daily, aes(x = Date)) +
+    geom_ribbon(aes(ymin = q05, ymax = q95), fill = "#c6dbef", alpha = 0.5) +
+    geom_ribbon(aes(ymin = q10, ymax = q90), fill = "#6baed6", alpha = 0.5) +
+    geom_ribbon(aes(ymin = q25, ymax = q75), fill = "#2171b5", alpha = 0.5) +
+    geom_line(aes(y = q50), colour = "#08306b", linewidth = 0.7) +
+    scale_x_date(date_breaks = "1 month", date_labels = "%b") +
+    labs(
+      x     = "Date",
+      y     = expression(nu[M](t)),
+      title = paste0("Daily OU trajectory: Vm_t  |  Year ", Year)
+    ) +
+    theme_minimal(base_size = 18) +
+    theme(
+      plot.title       = element_text(face = "bold", size = 18, hjust = 0.5),
+      axis.text.x      = element_text(angle = 45, hjust = 1, size = 18),
+      axis.text.y      = element_text(size = 18),
+      panel.grid.minor = element_blank()
+    )
+  
+  # ---- Plot r_t daily ----
+  p_rt_daily <- ggplot(df_rt_daily, aes(x = Date)) +
+    geom_ribbon(aes(ymin = q05, ymax = q95), fill = "#c6dbef", alpha = 0.5) +
+    geom_ribbon(aes(ymin = q10, ymax = q90), fill = "#6baed6", alpha = 0.5) +
+    geom_ribbon(aes(ymin = q25, ymax = q75), fill = "#2171b5", alpha = 0.5) +
+    geom_line(aes(y = q50), colour = "#08306b", linewidth = 0.7) +
+    scale_x_date(date_breaks = "1 month", date_labels = "%b") +
+    labs(
+      x     = "Date",
+      y     = expression(r(t)),
+      title = paste0("Daily OU trajectory: r_t  |  Year ", Year)
+    ) +
+    theme_minimal(base_size = 18) +
+    theme(
+      plot.title       = element_text(face = "bold", size = 18, hjust = 0.5),
+      axis.text.x      = element_text(angle = 45, hjust = 1, size = 18),
+      axis.text.y      = element_text(size = 18),
+      panel.grid.minor = element_blank()
+    )
+  
+  # ---- Save both as one stacked figure ----
+  if (iteration %in% c(46)) {
+    ggsave(
+      paste0("vm_daily_OU_", Year, ".png"),
+      plot   = p_vm_daily,
+      width  = 10, height = 5, dpi = 300
+    )
+    ggsave(
+      paste0("rt_daily_OU_", Year, ".png"),
+      plot   = p_rt_daily,
+      width  = 10, height = 5, dpi = 300
+    )
+    
+    # Or save as a single stacked 2-panel figure
+    p_combined_daily <- gridExtra::arrangeGrob(
+      p_vm_daily, p_rt_daily, ncol = 1
+    )
+    ggsave(
+      paste0("vm_rt_daily_OU_", Year, ".png"),
+      plot   = p_combined_daily,
+      width  = 10, height = 9, dpi = 300
+    )
+    message("Daily OU plots saved for year ", Year)
+  }
+  # ====================================================================
+  # Post-processing for this iteration
+  # ====================================================================
+  final_obs_count <- iteration + 4
+  dates <- 1:final_obs_count
+  date <- date_gam[dates]
+  
+  # Extract data for this iteration
+  Ih_obs <- X0_obs[1:final_obs_count]
+  
+  # Calculate quantiles
+  save_quantiles <- apply(save_vm_ensemble_global[, 1:final_obs_count], 2, quantile, 
+                          probs = c(0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95), na.rm = TRUE)
+  save_rt_quantiles <- apply(save_rt_ensemble_global[, 1:final_obs_count], 2, quantile, 
+                             probs = c(0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95), na.rm = TRUE)
+  save_quantiles2 <- apply(predicted_global[, 1:final_obs_count], 2, quantile, 
+                           probs = c(0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95), na.rm = TRUE)
+  save_quantiles3 <- apply(predicted2_global[, 1:final_obs_count], 2, quantile, 
+                           probs = c(0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95), na.rm = TRUE)
+  save_quantiles_human <- apply(predicted3_global[, 1:final_obs_count], 2, quantile, 
+                                probs = c(0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95), na.rm = TRUE)
+  # Diagnostics data frame
+  df_diagnostics <- data.frame(
+    date = date,
+    #scale_factor = scale_factor_history[1:final_obs_count],
+    sigma_t = sigma_t_history[1:final_obs_count]
+  )
+  
+  # ====================================================================
+  # Plotting
+  # ====================================================================
+  
+  # Plot scale_factor
+  # p1 <- ggplot(df_diagnostics, aes(x = as.Date(date), y = scale_factor)) +
+  #   geom_line(color = "blue", size = 1) +
+  #   geom_point(color = "blue", size = 2) +
+  #   labs(title = paste("Scale Factor over Time - Iteration", iteration),
+  #        x = "Date", y = "Scale Factor") +
+  #   theme_minimal() +
+  #   theme(axis.title = element_text(size = 14),
+  #         axis.text = element_text(size = 12),
+  #         plot.title = element_text(size = 16))
+  
+  # Plot sigma_t
+  p2 <- ggplot(df_diagnostics, aes(x = as.Date(date), y = sigma_t)) +
+    geom_line(color = "red", size = 1) +
+    geom_point(color = "red", size = 2) +
+    labs(#title = paste("Sigma_t over Time - Iteration", iteration),
+      x = "Date", y = "Sigma_t") +
+    theme_minimal() +
+    theme(axis.title = element_text(size = 14),
+          axis.text = element_text(size = 12),
+          plot.title = element_text(size = 16))
+  
+  # Vm plot
+  A1 <- ggplot() +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles[1, ], 
+                    ymax = save_quantiles[7, ]), fill = "lightblue", alpha = 0.5) +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles[2, ], 
+                    ymax = save_quantiles[6, ]), fill = "blue", alpha = 0.5) +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles[3, ], 
+                    ymax = save_quantiles[5, ]), fill = "#c6dbef", alpha = 0.5) +
+    geom_line(aes(x = as.Date(date), y = save_quantiles[4, ]), color = "red") +
+    labs(x = "Date", y = "Vmt") + #, title = paste("Iteration", iteration)) +
+    theme_minimal() +
+    theme(legend.position = "right",
+          axis.title = element_text(size = 17),
+          axis.text = element_text(size = 17),
+          legend.text = element_text(size = 15),
+          plot.title = element_text(size = 17))
+  
+  # rt plot
+  A2 <- ggplot() +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_rt_quantiles[1, ], 
+                    ymax = save_rt_quantiles[7, ]), fill = "lightblue", alpha = 0.5) +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_rt_quantiles[2, ], 
+                    ymax = save_rt_quantiles[6, ]), fill = "blue", alpha = 0.5) +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_rt_quantiles[3, ], 
+                    ymax = save_rt_quantiles[5, ]), fill = "#c6dbef", alpha = 0.5) +
+    geom_line(aes(x = as.Date(date), y = save_rt_quantiles[4, ]), color = "red") +
+    labs(x = "Date", y = "rt") + #, title = paste("Iteration", iteration)) +
+    theme_minimal() +
+    theme(legend.position = "right",
+          axis.title = element_text(size = 17),
+          axis.text = element_text(size = 17),
+          legend.text = element_text(size = 15),
+          plot.title = element_text(size = 17))
+  
+  # Total Abundance
+  A4 <- ggplot() +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles2[1, ], 
+                    ymax = save_quantiles2[7, ]), fill = "lightblue", alpha = 0.5) +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles2[2, ], 
+                    ymax = save_quantiles2[6, ]), fill = "blue", alpha = 0.5) +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles2[3, ], 
+                    ymax = save_quantiles2[5, ]), fill = "#c6dbef", alpha = 0.5) +
+    geom_line(aes(x = as.Date(date), y = save_quantiles2[4, ]), color = "black") +
+    geom_point(aes(x = as.Date(date), y = X_obs1_train[1:final_obs_count]), 
+               color = "red", size = 3) +
+    labs(x = "Date", y = "Total Abundance") + #, title = paste("Iteration", iteration)) +
+    #scale_y_continuous(limits = c(0,6500)) + #6500 for others, just comment for 2021
+    theme_minimal() +
+    theme(legend.position = "right",
+          axis.title = element_text(size = 17),
+          axis.text = element_text(size = 17),
+          legend.text = element_text(size = 15),
+          plot.title = element_text(size = 17))
+  
+  # Infectious per 1000
+  A5 <- ggplot() +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles3[1, ], 
+                    ymax = save_quantiles3[7, ]), fill = "lightblue", alpha = 0.5) +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles3[2, ], 
+                    ymax = save_quantiles3[6, ]), fill = "blue", alpha = 0.5) +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles3[3, ], 
+                    ymax = save_quantiles3[5, ]), fill = "#c6dbef", alpha = 0.5) +
+    geom_line(aes(x = as.Date(date), y = save_quantiles3[4, ]), color = "black") +
+    geom_point(aes(x = as.Date(date), y = X_obs2_train[1:final_obs_count]), 
+               color = "red", size = 3) +
+    labs(x = "Date", y = "Inf_Mosq_Per_1000") + #, title = paste("Iteration", iteration)) +
+    #scale_y_continuous(limits = c(0,40)) +
+    theme_minimal() +
+    theme(legend.position = "right",
+          axis.title = element_text(size = 17),
+          axis.text = element_text(size = 17),
+          legend.text = element_text(size = 15),
+          plot.title = element_text(size = 17))
+  
+  # Human cases
+  A6 <- ggplot() +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles_human[1, ], 
+                    ymax = save_quantiles_human[7, ]), fill = "lightblue", alpha = 0.5) +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles_human[2, ], 
+                    ymax = save_quantiles_human[6, ]), fill = "blue", alpha = 0.5) +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles_human[3, ], 
+                    ymax = save_quantiles_human[5, ]), fill = "#c6dbef", alpha = 0.5) +
+    geom_line(aes(x = as.Date(date), y = save_quantiles_human[4, ]), color = "black") +
+    geom_point(aes(x = as.Date(date), y = Ih_obs), color = "red",size = 3) +
+    labs(x = "Date", y = "Inf_human") + #, title = paste("Iteration", iteration)) +
+    #scale_y_continuous(limits = c(0,260)) + #260 for others, just comment out  for 2021
+    theme_minimal() +
+    theme(legend.position = "right",
+          axis.title = element_text(size = 17),
+          axis.text = element_text(size = 17),
+          legend.text = element_text(size = 15),
+          plot.title = element_text(size = 17))
+  
+  # Additional state variable plots (Sm, Im, Eh, Sb, Ib, Rb)
+  A7 <- save_ensemble_full_global[1, 1:N, 1:final_obs_count]
+  save_quantiles4 <- apply(A7, 2, quantile, probs = c(0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95), na.rm = TRUE)
+  S7 <- ggplot() +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles4[1, ], 
+                    ymax = save_quantiles4[7, ]), fill = "lightblue", alpha = 0.5) +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles4[2, ], 
+                    ymax = save_quantiles4[6, ]), fill = "blue", alpha = 0.5) +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles4[3, ], 
+                   ymax = save_quantiles4[5, ]), fill = "#c6dbef", alpha = 0.5) +
+    geom_line(aes(x = as.Date(date), y = save_quantiles4[4, ]), color = "red") +
+    labs(x = "Date", y = "Sm") + #, title = "Ensemble Kalman Filter: No. of Ensemble Member = 10000") +
+    theme_minimal() +
+    theme(legend.position = "right",
+          axis.title = element_text(size = 17),
+          axis.text = element_text(size = 17),
+          legend.text = element_text(size = 15),
+          plot.title = element_text(size = 17))
+  
+  A8 <- save_ensemble_full_global[2, 1:N, 1:final_obs_count]
+  save_quantiles5 <- apply(A8, 2, quantile, probs = c(0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95), na.rm = TRUE)
+  S8 <- ggplot() +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles5[1, ], 
+                    ymax = save_quantiles5[7, ]), fill = "lightblue", alpha = 0.5) +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles5[2, ], 
+                    ymax = save_quantiles5[6, ]), fill = "blue", alpha = 0.5) +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles5[3, ], 
+                    ymax = save_quantiles5[5, ]), fill = "#c6dbef", alpha = 0.5) +
+    geom_line(aes(x = as.Date(date), y = save_quantiles5[4, ]), color = "red") +
+    labs(x = "Date", y = "Im") + #, title = "Ensemble Kalman Filter: No. of Ensemble Member = 10000") +
+    theme_minimal() +
+    theme(legend.position = "right",
+          axis.title = element_text(size = 17),
+          axis.text = element_text(size = 17),
+          legend.text = element_text(size = 15),
+          plot.title = element_text(size = 17))
+  
+  A9 <- save_ensemble_full_global[7, 1:N, 1:final_obs_count]
+  save_quantiles6 <- apply(A9, 2, quantile, probs = c(0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95), na.rm = TRUE)
+  S9 <- ggplot() +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles6[1, ], 
+                    ymax = save_quantiles6[7, ]), fill = "lightblue", alpha = 0.5) +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles6[2, ], 
+                    ymax = save_quantiles6[6, ]), fill = "blue", alpha = 0.5) +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles6[3, ], 
+                    ymax = save_quantiles6[5, ]), fill = "#c6dbef", alpha = 0.5) +
+    geom_line(aes(x = as.Date(date), y = save_quantiles6[4, ]), color = "red") +
+    labs(x = "Date", y = "Eh") + #, title = "Ensemble Kalman Filter: No. of Ensemble Member = 10000") +
+    theme_minimal() +
+    theme(legend.position = "right",
+          axis.title = element_text(size = 17),
+          axis.text = element_text(size = 17),
+          legend.text = element_text(size = 15),
+          plot.title = element_text(size = 17))
+  
+  A3 <- save_ensemble_full_global[3, 1:N, 1:final_obs_count]
+  save_quantiles7 <- apply(A3, 2, quantile, probs = c(0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95), na.rm = TRUE)
+  S10 <- ggplot() +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles7[1, ], 
+                    ymax = save_quantiles7[7, ]), fill = "lightblue", alpha = 0.5) +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles7[2, ], 
+                    ymax = save_quantiles7[6, ]), fill = "blue", alpha = 0.5) +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles7[3, ], 
+                    ymax = save_quantiles7[5, ]), fill = "#c6dbef", alpha = 0.5) +
+    geom_line(aes(x = as.Date(date), y = save_quantiles7[4, ]), color = "red") +
+    labs(x = "Date", y = "Sb") + #, title = "Ensemble Kalman Filter: No. of Ensemble Member = 10000") +
+    theme_minimal() +
+    theme(legend.position = "right",
+          axis.title = element_text(size = 17),
+          axis.text = element_text(size = 17),
+          legend.text = element_text(size = 15),
+          plot.title = element_text(size = 17))
+  
+  A10 <- save_ensemble_full_global[4, 1:N, 1:final_obs_count]
+  save_quantiles8 <- apply(A10, 2, quantile, probs = c(0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95), na.rm = TRUE)
+  S11 <- ggplot() +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles8[1, ], 
+                    ymax = save_quantiles8[7, ]), fill = "lightblue", alpha = 0.5) +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles8[2, ], 
+                    ymax = save_quantiles8[6, ]), fill = "blue", alpha = 0.5) +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles8[3, ], 
+                    ymax = save_quantiles8[5, ]), fill = "#c6dbef", alpha = 0.5) +
+    geom_line(aes(x = as.Date(date), y = save_quantiles8[4, ]), color = "red") +
+    labs(x = "Date", y = "Ib") + #, title = "Ensemble Kalman Filter: No. of Ensemble Member = 10000") +
+    theme_minimal() +
+    theme(legend.position = "right",
+          axis.title = element_text(size = 17),
+          axis.text = element_text(size = 17),
+          legend.text = element_text(size = 15),
+          plot.title = element_text(size = 17))
+  
+  A11 <- save_ensemble_full_global[5, 1:N, 1:final_obs_count]
+  save_quantiles9 <- apply(A11, 2, quantile, probs = c(0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95), na.rm = TRUE)
+  S12 <- ggplot() +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles9[1, ], 
+                    ymax = save_quantiles9[7, ]), fill = "lightblue", alpha = 0.5) +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles9[2, ], ymax = save_quantiles9[6, ]), fill = "blue", alpha = 0.5) +
+    geom_ribbon(aes(x = as.Date(date), ymin = save_quantiles9[3, ], ymax = save_quantiles9[5, ]), fill = "#c6dbef", alpha = 0.5) +
+    geom_line(aes(x = as.Date(date), y = save_quantiles9[4, ]), color = "red") +
+    labs(x = "Date", y = "Rb") + #, title = "Ensemble Kalman Filter: No. of Ensemble Member = 10000") +
+    theme_minimal()+
+    theme(legend.position = "right",
+          axis.title = element_text(size = 17),  # cex.lab equivalent
+          axis.text = element_text(size = 17),   # cex.axis equivalent
+          legend.text = element_text(size = 15), # cex.names equivalent for legend
+          plot.title = element_text(size = 17))# Use a clean theme
+  
+  if (iteration %in% c(46)) {
+    ggsave(paste0("A1_iteration0FULL_", iteration, "_", Year, ".png"), plot = A1, width = 10, height = 8, dpi = 300)
+    ggsave(paste0("A2_iteration0FULL_", iteration, "_", Year, ".png"), plot = A2, width = 10, height = 8, dpi = 300)
+    ggsave(paste0("A3_iteration0FULL_", iteration, "_", Year, ".png"), plot = S10, width = 10, height = 8, dpi = 300)
+    ggsave(paste0("A4_iteration0FULL_", iteration, "_", Year, ".png"), plot = A4, width = 10, height = 8, dpi = 300)
+    ggsave(paste0("A5_iteration0FULL_", iteration, "_", Year, ".png"), plot = A5, width = 10, height = 8, dpi = 300)
+    ggsave(paste0("A6_iteration0FULL_", iteration, "_", Year, ".png"), plot = A6, width = 10, height = 8, dpi = 300)
+    ggsave(paste0("A7_iteration0FULL_", iteration, "_", Year, ".png"), plot = S7, width = 10, height = 8, dpi = 300)
+    ggsave(paste0("A8_iteration0FULL_", iteration, "_", Year, ".png"), plot = S8, width = 10, height = 8, dpi = 300)
+    ggsave(paste0("A9_iteration0FULL_", iteration, "_", Year, ".png"), plot = S9, width = 10, height = 8, dpi = 300)
+    ggsave(paste0("A10_iteration0FULL_", iteration, "_", Year, ".png"), plot = S11, width = 10, height = 8, dpi = 300)
+    ggsave(paste0("A11_iteration0FULL_", iteration, "_", Year, ".png"), plot = S12, width = 10, height = 8, dpi = 300)
+    #ggsave(paste0("A25_iteration0FULL_", iteration, ".png"), plot = p1, width = 10, height = 8, dpi = 300)
+    ggsave(paste0("A26_iteration0FULL_", iteration, "_", Year, ".png"), plot = p2, width = 10, height = 8, dpi = 300)
+    # --- Parameter histograms ---
+    png(paste0("Param_Hist_iteration0FULL_", iteration, ".png"), width = 1800, height = 800)
+    par(mfrow = c(3, 4))
+    for (i in 1:12) {
+      hist(static_global[i, ], main = paste(param_names[i]), xlab = "", col = "lightgray", border = "white", cex.main = 2.8,   # main title size
+           cex.lab = 2.5,    # axis label size
+           cex.axis = 2.3)
+    }
+     dev.off()
+     message("Parameter histograms saved for year ", Year)
+  }
+  
+  print(paste("In the forecast section"))
+  
+  vm_test <- save_vm_ensemble_global[, 1:final_obs_count]
+  rt_test = save_rt_ensemble_global[, 1:final_obs_count]
+  
+  
+  #combined_values <- array(NA, dim = c(10000, 52, 3))
+  combined_values <- array(NA, dim = c(N, final_obs_count, 2))
+  # Fill each slice
+  combined_values[, , 1] <- vm_test
+  combined_values[, , 2] <- rt_test
+  
+  n_forecast_sample = 1000
+  
+  #JOE mistake found
+  random_indices <- sample(1:N, n_forecast_sample)
+  selected_values <- combined_values[random_indices,, ]
+  loop_all_forecast <- vector("list", n_forecast_sample)
+  all_vm_forecast <- vector("list", n_forecast_sample)
+  all_rt_forecast <- vector("list", n_forecast_sample)
+  all_vm_daily_forecast <- vector("list", n_forecast_sample)  
+  all_rt_daily_forecast <- vector("list", n_forecast_sample)
+  all_fits_vm <- vector("list", n_forecast_sample) #added
+  all_forecasts_vm <- vector("list", n_forecast_sample) #added
+  all_fits_rt <- vector("list", n_forecast_sample) #added
+  all_forecasts_rt <- vector("list", n_forecast_sample) #added
+  selected_values2 <- save_ensemble_full_global[1:8, random_indices, 1:final_obs_count]
+  selected_values3 <- save_ensemble_full_global[11:22, random_indices, 1:final_obs_count]
+  for (i in 1:n_forecast_sample) {
+    Vm_t_median <- selected_values[i,,1 ]
+    rt_median<- selected_values[i,,2 ]
+    
+    Weeks <- as.numeric(1:length(Vm_t_median))
+    df_train_vm <- data.frame(Weeks = Weeks, Vm = as.numeric(Vm_t_median))
+    df_train_rt <- data.frame(Weeks = Weeks, rt = as.numeric(rt_median))
+    
+    fitted_vals_vm <- tail(Vm_t_median, 1) #added
+    fitted_vals_rt <- tail(rt_median, 1) #added
+    # Forecast for two weeks at a time
+    forecast_weeks <- max(df_train_vm$Weeks) + seq(1, 2, by = 1)  # Every two weeks
+    df_forecast <- data.frame(Weeks = forecast_weeks)  # Forecasting for two-week intervals
+    
+    #JOE
+    # Vm_pred <- rep(tail(fitted_vals_vm, 1), length(forecast_weeks))
+    # rt_pred <- rep(tail(fitted_vals_rt, 1), length(forecast_weeks))
+    # Vm_pred = vector("numeric", length = 2)
+    # rt_pred = vector("numeric", length = 2)
+    # 
+    # Vm_pred[1] = OUproc_func(tail(fitted_vals_vm, 1),
+    #                       mu = ou_mu_vm,
+    #                       lambda = ou_lambda_vm,
+    #                       sigma = ou_sigma_vm)
+    # Vm_pred[2] = OUproc_func(Vm_pred[1],
+    #                          mu = ou_mu_vm,
+    #                          lambda = ou_lambda_vm,
+    #                          sigma = ou_sigma_vm)
+    # 
+    # rt_pred[1] = OUproc_func(tail(fitted_vals_rt, 1),
+    #                          mu = ou_mu_r,
+    #                          lambda = ou_lambda_r,
+    #                          sigma = ou_sigma_r)
+    # rt_pred[2] = OUproc_func(rt_pred[1],
+    #                          mu = ou_mu_r,
+    #                          lambda = ou_lambda_r,
+    #                          sigma = ou_sigma_r)
+    
+    
+    # === DAILY CHAINED OU for 2-week forecast (exactly matches old weekly logic) ===
+    # Start from the very last fitted value
+    current_Vm <- tail(fitted_vals_vm, 1)
+    current_rt <- tail(fitted_vals_rt, 1)
+    
+    Vm_daily_forecast <- numeric(14)   # full 14 daily values (for the model)
+    rt_daily_forecast <- numeric(14)
+    
+    # ---- Week 1: 7 daily steps (days 1-7) ----
+    for (d in 1:7) {
+      current_Vm <- OUproc_func(current_Vm,
+                                mu = ou_mu_vm,
+                                lambda = ou_lambda_vm,
+                                sigma = ou_sigma_vm,
+                                dt = 1)
+      Vm_daily_forecast[d] <- current_Vm
+      forecast_obs_index <- iteration + 4
+      # adaptive sigma for r_t
+      ou_sigma_r_day <- if (forecast_obs_index < as.numeric(obs_year[as.character(Year)])) 0.002 else 1.50
+      ou_mu_r_day    <- if (forecast_obs_index < as.numeric(obs_year[as.character(Year)])) log(0.001) else log(0.05)
+      
+      current_rt <- OUproc_func(current_rt,
+                                mu = ou_mu_r_day,
+                                lambda = ou_lambda_r,
+                                sigma = ou_sigma_r_day,
+                                dt = 1)
+      rt_daily_forecast[d] <- current_rt
+    }
+    
+    # Save the *last* value of week 1 as the weekly value (for storage/quantiles)
+    Vm_pred <- numeric(2)
+    rt_pred <- numeric(2)
+    Vm_pred[1] <- current_Vm
+    rt_pred[1] <- current_rt
+    
+    # ---- Week 2: 7 daily steps (days 8-14), starting from the end of week 1 ----
+    for (d in 8:14) {
+      current_Vm <- OUproc_func(current_Vm,
+                                mu = ou_mu_vm,
+                                lambda = ou_lambda_vm,
+                                sigma = ou_sigma_vm,
+                                dt = 1)
+      Vm_daily_forecast[d] <- current_Vm
+      
+      ou_sigma_r_day <- if (forecast_obs_index < as.numeric(obs_year[as.character(Year)])) 0.002 else 1.50
+      ou_mu_r_day    <- if (forecast_obs_index < as.numeric(obs_year[as.character(Year)])) log(0.001) else log(0.05)
+      
+      current_rt <- OUproc_func(current_rt,
+                                mu = ou_mu_r_day,
+                                lambda = ou_lambda_r,
+                                sigma = ou_sigma_r_day,
+                                dt = 1)
+      rt_daily_forecast[d] <- current_rt
+    }
+    
+    # Save the *last* value of week 2 as the weekly value
+    Vm_pred[2] <- current_Vm
+    rt_pred[2] <- current_rt
+    
+    all_vm_forecast[[i]] <- Vm_pred
+    all_rt_forecast[[i]] <- rt_pred
+    all_vm_daily_forecast[[i]] <- Vm_daily_forecast   
+    all_rt_daily_forecast[[i]] <- rt_daily_forecast   
+    all_fits_vm[[i]] <- data.frame(Weeks = df_train_vm$Weeks, Fit = fitted_vals_vm) #added
+    all_forecasts_vm[[i]] <- data.frame(Weeks = forecast_weeks, Fit = Vm_pred)#added
+    all_fits_rt[[i]] <- data.frame(Weeks = df_train_rt$Weeks, Fit = fitted_vals_rt) #added
+    all_forecasts_rt[[i]] <- data.frame(Weeks = forecast_weeks, Fit = rt_pred)#added
+    Sm_next_week <- as.numeric(selected_values2[1,i,final_obs_count])
+    Sm_next = Sm_next_week
+    Im_next_week <- as.numeric(selected_values2[2,i, final_obs_count])
+    Im_next = Im_next_week
+    Sb_next_week <- as.numeric(selected_values2[3,i, final_obs_count])
+    Sb_next = Sb_next_week
+    Ib_next_week <- as.numeric(selected_values2[4,i, final_obs_count])
+    Ib_next = Ib_next_week
+    Rb_next_week <- as.numeric(selected_values2[5,i, final_obs_count])
+    Rb_next = Rb_next_week
+    Sh_next_week <- as.numeric(selected_values2[6,i, final_obs_count])
+    Sh_next = Sh_next_week
+    Eh_next_week <- as.numeric(selected_values2[7,i, final_obs_count])
+    Eh_next = Eh_next_week
+    Ih_next_week <- as.numeric(selected_values2[8,i, final_obs_count])
+    Ih_next = Ih_next_week
+    static_medians <- as.numeric(selected_values3[,i,final_obs_count])  # Static parameters for each ensemble member
+    forecast_week = forecast_weeks[1]
+    indx1 <- (forecast_week - 1) * 7 + 1  
+    indx2 <- indx1 + 13  
+    indx_range <- indx1:indx2
+    
+    T_temp_next_week  <- as.numeric(inputTem_i[indx_range])
+    P_temp_next_week <- as.numeric(inputP_i[indx_range])
+    #print(T_temp_next_week)
+    #print(P_temp_next_week)
+    # Initialize ensemble matrix
+    sirWNV_ensemble <- matrix(
+      c(Sm_next, Im_next,Sb_next, Ib_next, Rb_next, Sh_next, Eh_next, Ih_next),
+      nrow = 8, ncol = 1
+    )
+    
+    
+    if(iteration %in% c(32)){
+      cat("Im_next:", sirWNV_ensemble[2, ], "\n")
+    }
+    
+    # To store Sm, Im, Ih etc for each forecasted week
+    all_forecast <- matrix(NA, nrow = 8, ncol = 2)  # rows: Sm, Im, Ih etc; cols: week1, week2
+    #JOE mistake found
+    for (temp_week in 1:2) {
+      day_idx <- ((temp_week - 1) * 7 + 1):(temp_week * 7)
+      # VERIFICATION: Print what you're passing
+      # cat("\n=== Week", week, "===\n")
+      # cat("T_temp being passed:", T_temp_next_week[day_idx], "\n")
+      # cat("P_temp being passed:", P_temp_next_week[day_idx], "\n")
+      sirWNV_ensemble <- WNV_model(
+        sirWNV_ensemble,
+        Vm_t = Vm_daily_forecast[day_idx],
+        r_t = rt_daily_forecast[day_idx],
+        T_temp = T_temp_next_week[day_idx],
+        P_temp = P_temp_next_week[day_idx],
+        par_input = static_medians,
+        week = forecast_weeks[temp_week]
+      )
+      # Save  after each week
+      if(iteration %in% c(32)){
+        cat("Im after model run:", sirWNV_ensemble[2, 1], "\n")
+      }
+
+      all_forecast[, temp_week] <- sirWNV_ensemble[c(1:8), 1]
+      
+    }
+    
+    
+    loop_all_forecast[[i]] <- all_forecast
+  }
+  vm_matrix <- do.call(rbind, all_vm_forecast)  # Convert to matrix: 1000 rows × 2 columns (weeks)
+  
+  vm_forecast_q <- apply(vm_matrix, 2, function(x) quantile(x, c(0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 
+                                                                 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 
+                                                                 0.95, 0.975, 0.99)))
+  rt_matrix <- do.call(rbind, all_rt_forecast)  # Convert to matrix: 1000 rows × 2 columns (weeks)
+  
+  rt_forecast_q <- apply(rt_matrix, 2, function(x) quantile(x, c(0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 
+                                                                 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 
+                                                                 0.95, 0.975, 0.99)))
+  
+  WNV_forecast_array <- simplify2array(loop_all_forecast)  # dimensions: 5 x 2 x 1000
+  
+  
+  
+  # For week 1
+  total_abundance_1 <- WNV_forecast_array[1,1, ] + WNV_forecast_array[2,1, ]
+  abundance_1 <- WNV_forecast_array[1,1, ]
+  infectious_mosq_1 <- WNV_forecast_array[2,1, ]
+  human_cases_1 <- WNV_forecast_array[8,1, ]
+  # Filter: keep only ensemble members where total abundance > 0 and infection rate < 100%
+  valid_idx_1 <- which(total_abundance_1 > 0 & 
+                         (infectious_mosq_1 / total_abundance_1) < 1.0)
+  
+  if(length(valid_idx_1) > 0) {
+    # Calculate infectious per 1000 only for valid ensemble members
+    infectious_per_1000_1 <- (infectious_mosq_1[valid_idx_1] / total_abundance_1[valid_idx_1]) * 1000
+    
+    # Get quantiles
+    total_abundance_q_1 <- quantile(total_abundance_1[valid_idx_1], 
+                                    probs = c(0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 
+                                              0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 
+                                              0.95, 0.975, 0.99))
+    infectious_per_1000_q_1 <- quantile(infectious_per_1000_1, 
+                                        probs = c(0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 
+                                                  0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 
+                                                  0.95, 0.975, 0.99))
+    human_cases_q_1 <- quantile(human_cases_1[valid_idx_1], 
+                                probs = c(0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 
+                                          0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 
+                                          0.95, 0.975, 0.99))
+    abundance_q_1 <- quantile(abundance_1[valid_idx_1], 
+                              probs = c(0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 
+                                        0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 
+                                        0.95, 0.975, 0.99))
+    infectious_mosq_q_1 <- quantile(infectious_mosq_1[valid_idx_1], 
+                                    probs = c(0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 
+                                              0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 
+                                              0.95, 0.975, 0.99))
+  } else {
+    # Handle case where no valid ensemble members exist
+    warning(paste("Iteration", iteration, "Week 1: No valid ensemble members"))
+    
+  }
+  
+  # For week 2 
+  total_abundance_2 <- WNV_forecast_array[1,2, ] + WNV_forecast_array[2,2, ]
+  abundance_2 <- WNV_forecast_array[1,2, ]
+  infectious_mosq_2 <- WNV_forecast_array[2,2, ]
+  human_cases_2 <- WNV_forecast_array[8,2, ]
+  
+  valid_idx_2 <- which(total_abundance_2 > 0 & 
+                         (infectious_mosq_2 / total_abundance_2) < 1.0)
+  
+  if(length(valid_idx_2) > 0) {
+    infectious_per_1000_2 <- (infectious_mosq_2[valid_idx_2] / total_abundance_2[valid_idx_2]) * 1000
+    
+    total_abundance_q_2 <- quantile(total_abundance_2[valid_idx_2], 
+                                    probs = c(0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 
+                                              0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 
+                                              0.95, 0.975, 0.99))
+    infectious_per_1000_q_2 <- quantile(infectious_per_1000_2, 
+                                        probs = c(0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 
+                                                  0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 
+                                                  0.95, 0.975, 0.99))
+    human_cases_q_2 <- quantile(human_cases_2[valid_idx_2], 
+                                probs = c(0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 
+                                          0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 
+                                          0.95, 0.975, 0.99))
+    abundance_q_2 <- quantile(abundance_2[valid_idx_2], 
+                              probs = c(0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 
+                                        0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 
+                                        0.95, 0.975, 0.99))
+    infectious_mosq_q_2 <- quantile(infectious_mosq_2[valid_idx_2], 
+                                    probs = c(0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 
+                                              0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 
+                                              0.95, 0.975, 0.99))
+  } else {
+    warning(paste("Iteration", iteration, "Week 2: No valid ensemble members"))
+  }
+  results[[iteration]] <- list(
+    vm_forecast_q = vm_forecast_q,
+    rt_forecast_q = rt_forecast_q,
+    total_abundance_q_1 = total_abundance_q_1,
+    total_abundance_q_2 = total_abundance_q_2,
+    infectious_per_1000_q_2 = infectious_per_1000_q_2,
+    infectious_per_1000_q_1 = infectious_per_1000_q_1,
+    human_cases_q_1 = human_cases_q_1,
+    human_cases_q_2 = human_cases_q_2,
+    infectious_mosq_q_2 = infectious_mosq_q_2,
+    infectious_mosq_q_1 = infectious_mosq_q_1,
+    abundance_q_1 = abundance_q_1,
+    abundance_q_2 = abundance_q_2
+  )
+}
+
+saveRDS(results, file = paste0("results_FullModel_", Year, ".rds"))
+
+results <- readRDS(paste0("results_FullModel_", Year, ".rds"))
+
+
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(epipredict)
+library(distributional)
+
+#####################################
+## Convert Custom Results to       ##
+## epipredict Format for WIS       ##
+#####################################
+
+convert_to_quantile_pred <- function(quantiles_vector, quantile_levels) {
+  
+  # If quantiles_vector is already a named vector, use it directly
+  # Otherwise, assume it's in the same order as quantile_levels
+  if (is.null(names(quantiles_vector))) {
+    names(quantiles_vector) <- as.character(quantile_levels)
+  }
+  
+  # Convert to dist_quantiles
+  dist_quantiles(
+    list(as.numeric(quantiles_vector)),
+    list(quantile_levels)
+  )
+}
+
+calculate_wis_from_custom_results <- function(results, 
+                                              actual_data,
+                                              target_variable,
+                                              horizon,
+                                              quantile_levels = c(0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 
+                                                                  0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 
+                                                                  0.95, 0.975, 0.99)) {
+  
+  n_forecasts <- length(results)
+  
+  wis_results <- map_dfr(1:n_forecasts, function(i) {
+    # Get the forecast quantiles for this iteration
+    forecast_key <- paste0(target_variable, "_q_", horizon)
+    forecast_quantiles <- results[[i]][[forecast_key]]
+    
+    # Get the actual value for this forecast
+    # The actual value is at position i + horizon (since we're forecasting ahead)
+    actual_idx <- i + 5 + horizon - 1  # Assuming you start forecasting after 5 training weeks
+    
+    if (actual_idx > length(actual_data)) {
+      return(NULL)  # Skip if we don't have actual data
+    }
+    
+    actual_value <- actual_data[actual_idx]
+    
+    # Skip if actual value is NA
+    if (is.na(actual_value)) {
+      return(NULL)
+    }
+    
+    # Convert to quantile_pred format (matrix with 1 row)
+    # The quantile values should be in a matrix format
+    quantile_matrix <- matrix(as.numeric(forecast_quantiles), nrow = 1)
+    
+    # Create quantile_pred object
+    pred_dist <- quantile_pred(quantile_matrix, quantile_levels)
+    
+    # Calculate WIS using epipredict function
+    wis_score <- weighted_interval_score(
+      x = pred_dist,
+      actual = actual_value,
+      quantile_levels = quantile_levels,
+      na_handling = "impute"
+    )
+    
+    # Return results
+    tibble(
+      iteration = i,
+      horizon = horizon,
+      target = target_variable,
+      actual = actual_value,
+      median_forecast = forecast_quantiles[["50%"]] %||% forecast_quantiles[[12]],  # 0.5 quantile
+      WIS = as.numeric(wis_score)
+    )
+  })
+  
+  return(wis_results)
+}
+
+calculate_wis_all_targets <- function(results,
+                                      X_obs1,  #  Total abundance
+                                      X_obs2,  #  Infected per 1000
+                                      X0_obs,  # Human cases
+                                      quantile_levels = c(0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 
+                                                          0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 
+                                                          0.95, 0.975, 0.99)) {
+  
+  cat("Calculating WIS for all targets...\n")
+  
+  # Total abundance
+  wis_abundance_1wk <- calculate_wis_from_custom_results(
+    results, X_obs1, "total_abundance", 1, quantile_levels
+  )
+  wis_abundance_2wk <- calculate_wis_from_custom_results(
+    results, X_obs1, "total_abundance", 2, quantile_levels
+  )
+  
+  # Infected per 1000
+  wis_infected_1wk <- calculate_wis_from_custom_results(
+    results, X_obs2, "infectious_per_1000", 1, quantile_levels
+  )
+  wis_infected_2wk <- calculate_wis_from_custom_results(
+    results, X_obs2, "infectious_per_1000", 2, quantile_levels
+  )
+  
+  # Human cases
+  wis_cases_1wk <- calculate_wis_from_custom_results(
+    results, X0_obs, "human_cases", 1, quantile_levels
+  )
+  wis_cases_2wk <- calculate_wis_from_custom_results(
+    results, X0_obs, "human_cases", 2, quantile_levels
+  )
+  
+  cat("WIS calculation complete!\n")
+  
+  return(list(
+    abundance_1wk = wis_abundance_1wk,
+    abundance_2wk = wis_abundance_2wk,
+    infected_1wk = wis_infected_1wk,
+    infected_2wk = wis_infected_2wk,
+    cases_1wk = wis_cases_1wk,
+    cases_2wk = wis_cases_2wk
+  ))
+}
+
+summarize_wis_results <- function(wis_results) {
+  summary_list <- map_dfr(names(wis_results), function(name) {
+    data <- wis_results[[name]]
+    if (is.null(data) || nrow(data) == 0) {
+      return(NULL)
+    }
+    
+    tibble(
+      Variable = sub("_.*", "", name),
+      Horizon = sub(".*_", "", name),
+      n_forecasts = nrow(data),
+      Mean_WIS = mean(data$WIS, na.rm = TRUE),
+      Median_WIS = median(data$WIS, na.rm = TRUE),
+      SD_WIS = sd(data$WIS, na.rm = TRUE),
+      Min_WIS = min(data$WIS, na.rm = TRUE),
+      Max_WIS = max(data$WIS, na.rm = TRUE)
+    )
+  })
+  
+  return(summary_list)
+}
+
+calculate_normalized_wis_custom <- function(wis_results) {
+  
+  normalized_list <- map_dfr(names(wis_results), function(name) {
+    data <- wis_results[[name]]
+    if (is.null(data) || nrow(data) == 0) {
+      return(NULL)
+    }
+    
+    Y_total <- sum(data$actual, na.rm = TRUE)
+    sum_wis <- sum(data$WIS, na.rm = TRUE)
+    
+    if (Y_total == 0) {
+      wis_norm <- NA
+    } else {
+      wis_norm <- (1 / Y_total) * sum_wis
+    }
+    
+    tibble(
+      Variable = sub("_.*", "", name),
+      Horizon = sub(".*_", "", name),
+      WIS_normalized = wis_norm,
+      n_forecasts = nrow(data)
+    )
+  })
+  
+  return(normalized_list)
+}
+
+#####################################
+## Visualization Functions         ##
+#####################################
+
+plot_wis_custom_results <- function(wis_results, add_dates = TRUE, start_date = as.Date("2014-02-15")) {
+  
+  # Combine all results
+  combined <- bind_rows(wis_results, .id = "forecast_type") %>%
+    separate(forecast_type, into = c("Variable", "Horizon"), sep = "_(?=[12]wk)")
+  
+  # Add dates if requested
+  if (add_dates) {
+    combined <- combined %>%
+      mutate(Date = start_date + 7 * (iteration - 1))
+    x_var <- "Date"
+  } else {
+    x_var <- "iteration"
+  }
+  facet_labels <- c(
+    "abundance" = "Total abundance",
+    "cases" = "Human cases",
+    "infected" = "Infectious mosq per 1000"
+  )
+  # Create plot
+  p <- ggplot(combined, aes(x = .data[[x_var]], y = WIS, color = Horizon, group = Horizon)) +
+    geom_line(linewidth = 0.8) +
+    geom_point(size = 1.5, alpha = 0.6) +
+    facet_wrap(~Variable, scales = "free_y", ncol = 1) +
+    scale_color_manual(
+      values = c("1wk" = "#2E86AB", "2wk" = "#A23B72"),
+      labels = c("1wk" = "1-week ahead", "2wk" = "2-week ahead")
+    ) +
+    labs(
+      title = "Weighted Interval Score (WIS) Over Time",
+      subtitle = "Lower scores indicate better forecast performance",
+      x = if (add_dates) "Date" else "Iteration",
+      y = "WIS",
+      color = "Forecast Horizon"
+    ) +
+    theme_minimal() +
+    theme(
+      legend.position = "bottom",
+      strip.text = element_text(face = "bold", size = 11),
+      axis.title = element_text(size = 17),  # cex.lab equivalent
+          axis.text = element_text(size = 17),   # cex.axis equivalent
+          legend.text = element_text(size = 15), # cex.names equivalent for legend
+      plot.title = element_text(face = "bold", size = 17)
+    )+
+    scale_x_date(date_breaks = "2 month", date_labels = "%b %Y")+ 
+    facet_wrap(~Variable, scales = "free_y", ncol = 1, 
+               labeller = as_labeller(facet_labels))
+  
+  return(p)
+}
+
+plot_wis_summary_custom <- function(wis_summary) {
+  
+  p <- ggplot(wis_summary, aes(x = Variable, y = Mean_WIS, fill = Horizon)) +
+    geom_col(position = "dodge", alpha = 0.8) +
+    geom_errorbar(
+      aes(ymin = Mean_WIS - SD_WIS, ymax = Mean_WIS + SD_WIS),
+      position = position_dodge(width = 0.9),
+      width = 0.2
+    ) +
+    scale_fill_manual(
+      values = c("1wk" = "#2E86AB", "2wk" = "#A23B72"),
+      labels = c("1wk" = "1-week ahead", "2wk" = "2-week ahead")
+    ) +
+    labs(
+      title = "Mean WIS with Standard Deviation",
+      subtitle = "Error bars show ±1 SD",
+      x = "Variable",
+      y = "Mean WIS",
+      fill = "Horizon"
+    ) +
+    theme_minimal() +
+    theme(
+      legend.position = "bottom",
+      axis.title = element_text(size = 17),  # cex.lab equivalent
+          axis.text = element_text(size = 17),   # cex.axis equivalent
+          legend.text = element_text(size = 15), # cex.names equivalent for legend
+      plot.title = element_text(face = "bold", size = 17)
+    )
+  
+  return(p)
+}
+
+#####################################
+## Usage                   ##
+#####################################
+
+# # After running your forecasts and having results list:
+# 
+# # 1. Calculate WIS for all targets
+wis_all <- calculate_wis_all_targets(
+  results = results,
+  X_obs1 = X_obs1,
+  X_obs2 = X_obs2,
+  X0_obs = X0_obs,
+  quantile_levels = c(0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 
+                      0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 
+                      0.95, 0.975, 0.99)
+)
+
+saveRDS(wis_all, file = paste0("wis_all_FullModel_", Year, ".rds"))
+wis_all <- readRDS(paste0("wis_all_FullModel_", Year, ".rds")) 
+# 
+# # 2. Summarize WIS
+wis_summary <- summarize_wis_results(wis_all)
+print(wis_summary)
+# 
+# # 3. Calculate normalized WIS
+normalized_wis <- calculate_normalized_wis_custom(wis_all)
+print(normalized_wis)
+# 
+# # 4. Visualize
+plot_wis_custom_results(wis_all, add_dates = TRUE, start_date = forecast_1week_dates[1])
+plot_wis_summary_custom(wis_summary)
+# 
+# # 5. Access individual components
+head(wis_all$abundance_1wk)
+head(wis_all$cases_2wk)
+# 
+
+
+
+
+
+#######################
+#New plot
+
+# ====================================================================
+# UNIVERSAL DATE SETUP - Define ONCE at the beginning
+# ====================================================================
+
+# Training period dates (what the model was fitted on)
+# Starts at week 5 (iteration 1 uses weeks 1-5)
+training_start_date <- as.Date("2014-01-01")  # Week 1
+fitting_start_date <- as.Date("2014-02-01")    # Week 5 (iteration 1)
+
+# Create dates for all 52 weeks in 2014
+all_weeks_2014 <- seq(training_start_date, by = "weeks", length.out = 52)
+
+# Dates for observations (all 52 weeks)
+observed_dates <- all_weeks_2014
+
+# Dates for 1-week-ahead forecasts (iterations 1-46)
+# Iteration 1: uses weeks 1-5, forecasts week 6
+# Iteration 2: uses weeks 1-6, forecasts week 7
+# ...
+# Iteration 46: uses weeks 1-50, forecasts week 51
+forecast_1week_dates <- all_weeks_2014[6:51]  # Weeks 6-51 (46 forecasts)
+
+# Dates for 2-week-ahead forecasts (iterations 1-46)
+# Iteration 1: uses weeks 1-5, forecasts week 7
+# Iteration 2: uses weeks 1-6, forecasts week 8
+# ...
+# Iteration 46: uses weeks 1-50, forecasts week 52
+forecast_2week_dates <- all_weeks_2014[7:52]  # Weeks 7-52 (46 forecasts)
+
+# ====================================================================
+# Verify alignment
+# ====================================================================
+# Iteration 1 setup:
+# - Training: weeks 1-5 (2014-01-01 to 2014-01-29)
+# - 1-week forecast: week 6 (2014-02-05)
+# - 2-week forecast: week 7 (2014-02-12)
+
+# Observed data alignment:
+# X0_obs, X_obs1, X_obs2 should have 52 values for weeks 1-52
+# For 1-week forecasts, compare with X0_obs[6:51] (observations at weeks 6-51)
+# For 2-week forecasts, compare with X0_obs[7:52] (observations at weeks 7-52)
+
+# ====================================================================
+# TIME-VARYING PARAMETERS (Vm, rt)
+# ====================================================================
+
+# For time-varying parameters, we forecast at each iteration
+# These are plotted differently (overlapping forecasts)
+
+plot_data_list0 <- list()
+for (i in 1:num_iterations) {
+  forecast_data <- as.data.frame(results[[i]]$vm_forecast_q)
+  
+  # Transpose and reshape
+  forecast_data <- as.data.frame(t(forecast_data))
+  colnames(forecast_data) <- c("2.5%", "50%", "97.5%")
+  
+  # Assign dates for 1-week and 2-week forecasts
+  # Iteration i forecasts weeks (i+5) and (i+6)
+  forecast_data$Date <- c(forecast_1week_dates[i], forecast_2week_dates[i])
+  forecast_data$Week <- c(i + 5, i + 6)  # Actual week numbers
+  forecast_data$Iteration <- i
+  forecast_data$Type <- "Forecast"
+  
+  plot_data_list0[[i]] <- forecast_data
+}
+
+plot_data0 <- bind_rows(plot_data_list0) %>%
+  dplyr::rename(Lower = `2.5%`, Median = `50%`, Upper = `97.5%`)
+
+# Mark odd/even rows for different forecast horizons
+plot_data0$Row_Type <- ifelse(seq_len(nrow(plot_data0)) %% 2 == 1, "1-week", "2-week")
+
+# Plot Vm - 1-week ahead forecasts
+ggplot() +
+  geom_ribbon(data = subset(plot_data0, Row_Type == "1-week"),
+              aes(x = as.Date(Date), ymin = Lower, ymax = Upper),
+              fill = "lightblue", alpha = 0.5) +
+  geom_line(data = subset(plot_data0, Row_Type == "1-week"),
+            aes(x = as.Date(Date), y = Median, color = "1-week forecast"),
+            size = 1) +
+  labs(x = "Date", y = "Vm (Time varying parameter)",
+       title = "1-week ahead forecasts") +
+  scale_color_manual(name = "Legend", values = c("1-week forecast" = "blue")) +
+  theme_minimal() +
+  theme(legend.position = "top",
+        axis.title = element_text(size = 18),
+        axis.text = element_text(size = 18),
+        legend.text = element_text(size = 11))+
+  scale_x_date(date_breaks = "2 month", date_labels = "%b %Y")
+
+# Plot Vm - 2-week ahead forecasts
+ggplot() +
+  geom_ribbon(data = subset(plot_data0, Row_Type == "2-week"),
+              aes(x = as.Date(Date), ymin = Lower, ymax = Upper),
+              fill = "grey", alpha = 0.7) +
+  geom_line(data = subset(plot_data0, Row_Type == "2-week"),
+            aes(x = as.Date(Date), y = Median, color = "2-week forecast"),
+            size = 1) +
+  labs(x = "Date", y = "Vm (Time varying parameter)",
+       title = "2-week ahead forecasts") +
+  scale_color_manual(name = "Legend", values = c("2-week forecast" = "black")) +
+  theme_minimal() +
+  theme(legend.position = "top",
+        axis.title = element_text(size = 18),
+        axis.text = element_text(size = 18),
+        legend.text = element_text(size = 11))+
+  scale_x_date(date_breaks = "2 month", date_labels = "%b %Y")
+
+# Same for rt
+plot_data_list1 <- list()
+for (i in 1:num_iterations) {
+  forecast_data <- as.data.frame(results[[i]]$rt_forecast_q)
+  forecast_data <- as.data.frame(t(forecast_data))
+  colnames(forecast_data) <- c("2.5%", "50%", "97.5%")
+  forecast_data$Date <- c(forecast_1week_dates[i], forecast_2week_dates[i])
+  forecast_data$Week <- c(i + 5, i + 6)
+  forecast_data$Iteration <- i
+  forecast_data$Type <- "Forecast"
+  plot_data_list1[[i]] <- forecast_data
+}
+
+plot_data1 <- bind_rows(plot_data_list1) %>%
+  rename(Lower = `2.5%`, Median = `50%`, Upper = `97.5%`)
+plot_data1$Row_Type <- ifelse(seq_len(nrow(plot_data1)) %% 2 == 1, "1-week", "2-week")
+
+# ====================================================================
+# STATE FORECASTS (Human cases, Total abundance, Infectious_Mosq_1000)
+# ====================================================================
+
+# 1-WEEK AHEAD - Human Cases
+plot_data3 <- map_dfr(1:num_iterations, ~ {
+  forecast_data <- results[[.x]]$human_cases_q_1
+  data.frame(
+    Iteration = .x,
+    Week = .x + 5,  # Actual week number being forecasted
+    Date = forecast_1week_dates[.x],  # Use universal dates
+    #50% CI 
+    Lower_50 = forecast_data[["25%"]],
+    Upper_50 = forecast_data[["75%"]],
+    # 90% CI
+    Lower_90 = forecast_data[["5%"]],
+    Upper_90 = forecast_data[["95%"]],
+    # 80% CI 
+    Lower_80 = forecast_data[["10%"]],
+    Upper_80 = forecast_data[["90%"]],
+    
+    # Median
+    Median = forecast_data[["50%"]]
+  )
+})
+
+# Observed data for 1-week forecasts
+df_observed_1week <- data.frame(
+  Date = forecast_1week_dates,
+  Week = 6:51,
+  X_real = X0_obs[6:51],  # Observations at weeks 6-51
+  Type = "Observed"
+)
+
+Q1 = ggplot() +
+  # 50% CI - outermost, thickest, most transparent
+  geom_linerange(data = plot_data3,
+                 aes(x = as.Date(Date), ymin = Lower_50, ymax = Upper_50, color = "50% CI"),
+                 linewidth = 3, alpha = 0.3) +
+  # 50% CI - innermost, thinnest, least transparent
+  geom_linerange(data = plot_data3,
+                 aes(x = as.Date(Date), ymin = Lower_90, ymax = Upper_90, color = "90% CI"),
+                 linewidth = 1.5, alpha = 0.7) +
+  # 80% CI - middle layer
+  geom_linerange(data = plot_data3,
+                 aes(x = as.Date(Date), ymin = Lower_80, ymax = Upper_80, color = "80% CI"),
+                 linewidth = 2, alpha = 0.5) +
+  # Median point
+  geom_point(data = plot_data3,
+             aes(x = as.Date(Date), y = Median, color = "Forecast"),
+             size = 2) +
+  # Observed data
+  geom_line(data = df_observed_1week,
+            aes(x = as.Date(Date), y = X_real, color = "Observed"),
+            linewidth = 1) +
+  labs(x = "Date", y = "Human Cases",
+       title = "1-week ahead forecasts with uncertainty intervals") +
+  scale_color_manual(
+    name = "Uncertainty",
+    values = c(
+      "90% CI" = "#6baed6",    # Medium blue
+      "80% CI" = "#08519c" ,    # Dark blue
+      "50% CI" = "blue",    # Very light blue
+      "Forecast" = "blue",    # Dark blue (matches 50% CI)
+      "Observed" = "red"     # Red
+    ),
+    breaks = c("90% CI", "80% CI", "50% CI", "Forecast", "Observed")  # Control legend order
+  ) +
+  scale_y_continuous(limits = c(0, 260)) +
+  theme_minimal() +
+  theme(
+    legend.position = "top",
+    axis.title = element_text(size = 18),
+    axis.text = element_text(size = 18),
+    legend.text = element_text(size = 14),
+    plot.title = element_text(size = 16, face = "bold")
+  ) +
+  scale_x_date(date_breaks = "2 month", date_labels = "%b %Y")
+
+# 2-WEEK AHEAD - Human Cases
+plot_data4 <- map_dfr(1:num_iterations, ~ {
+  forecast_data <- results[[.x]]$human_cases_q_2
+  data.frame(
+    Iteration = .x,
+    Week = .x + 6,  # Actual week number being forecasted
+    Date = forecast_2week_dates[.x],  # Use universal dates
+    #50% CI 
+    Lower_50 = forecast_data[["25%"]],
+    Upper_50 = forecast_data[["75%"]],
+    # 90% CI
+    Lower_90 = forecast_data[["5%"]],
+    Upper_90 = forecast_data[["95%"]],
+    # 80% CI 
+    Lower_80 = forecast_data[["10%"]],
+    Upper_80 = forecast_data[["90%"]],
+    
+    # Median
+    Median = forecast_data[["50%"]]
+  )
+})
+
+# Observed data for 2-week forecasts
+df_observed_2week <- data.frame(
+  Date = forecast_2week_dates,
+  Week = 7:52,
+  X_real = X0_obs[7:52],  # Observations at weeks 7-52
+  Type = "Observed"
+)
+
+Q2 = ggplot() +
+  # 50% CI - lightest gray, thickest
+  geom_linerange(data = plot_data4,
+                 aes(x = as.Date(Date), ymin = Lower_50, ymax = Upper_50, color = "50% CI"),
+                 linewidth = 4, alpha = 0.3) +
+  # 90% CI - medium gray
+  geom_linerange(data = plot_data4,
+                 aes(x = as.Date(Date), ymin = Lower_90, ymax = Upper_90, color = "90% CI"),
+                 linewidth = 3, alpha = 0.5) +
+  # 80% CI - dark gray
+  geom_linerange(data = plot_data4,
+                 aes(x = as.Date(Date), ymin = Lower_80, ymax = Upper_80, color = "80% CI"),
+                 linewidth = 2, alpha = 0.7) +
+  # Median forecast points
+  geom_point(data = plot_data4,
+             aes(x = as.Date(Date), y = Median, color = "Forecast"),
+             size = 3) +
+  # Observed data
+  geom_line(data = df_observed_2week,
+            aes(x = as.Date(Date), y = X_real, color = "Observed"),
+            linewidth = 1.5) +
+  labs(x = "Date", y = "Human Cases",
+       title = "2-week ahead forecasts with uncertainty intervals") +
+  scale_color_manual(
+    name = "Uncertainty",
+    values = c(
+      "90% CI" = "#636363",    # Medium gray
+      "80% CI" = "#252525",    # Very dark gray
+      "50% CI" = "black",    # Light gray
+      "Forecast" = "black",  # Black
+      "Observed" = "red"   # Red
+    ),
+    breaks = c( "90% CI", "80% CI", "50% CI", "Forecast", "Observed")
+  ) +
+  scale_y_continuous(limits = c(0, 260)) +
+  theme_minimal() +
+  theme(
+    legend.position = "top",
+    axis.title = element_text(size = 18),
+    axis.text = element_text(size = 18),
+    legend.text = element_text(size = 14),
+    plot.title = element_text(size = 16, face = "bold")
+  ) +
+  scale_x_date(date_breaks = "2 month", date_labels = "%b %Y")
+
+
+
+# 1-WEEK AHEAD - Infectious_Mosq_1000
+# Prepare data with multiple confidence intervals
+plot_data7 <- map_dfr(1:num_iterations, ~ {
+  forecast_data <- results[[.x]]$infectious_per_1000_q_1
+  data.frame(
+    Iteration = .x,
+    Date = forecast_1week_dates[.x],
+    #50% CI 
+    Lower_50 = forecast_data[["25%"]],
+    Upper_50 = forecast_data[["75%"]],
+    # 90% CI
+    Lower_90 = forecast_data[["5%"]],
+    Upper_90 = forecast_data[["95%"]],
+    # 80% CI 
+    Lower_80 = forecast_data[["10%"]],
+    Upper_80 = forecast_data[["90%"]],
+    
+    # Median
+    Median = forecast_data[["50%"]]
+  )
+})
+
+df_observed_Infectious_Mosq_1000_1week <- data.frame(
+  Date = forecast_1week_dates,
+  X_real = X_obs2[6:51],
+  Type = "Observed"
+)
+
+Q3 <- ggplot() +
+  # 50% CI - outermost, thickest, most transparent
+  geom_linerange(data = plot_data7,
+                 aes(x = as.Date(Date), ymin = Lower_50, ymax = Upper_50, color = "50% CI"),
+                 linewidth = 3, alpha = 0.3) +
+  # 90% CI - innermost, thinnest, least transparent
+  geom_linerange(data = plot_data7,
+                 aes(x = as.Date(Date), ymin = Lower_90, ymax = Upper_90, color = "90% CI"),
+                 linewidth = 1.5, alpha = 0.7) +
+  # 80% CI - middle layer
+  geom_linerange(data = plot_data7,
+                 aes(x = as.Date(Date), ymin = Lower_80, ymax = Upper_80, color = "80% CI"),
+                 linewidth = 2, alpha = 0.5) +
+  # Median point
+  geom_point(data = plot_data7,
+             aes(x = as.Date(Date), y = Median, color = "Forecast"),
+             size = 2) +
+  # Observed data
+  geom_line(data = df_observed_Infectious_Mosq_1000_1week,
+            aes(x = as.Date(Date), y = X_real, color = "Observed"),
+            linewidth = 1) +
+  labs(x = "Date", y = "Infectious Mosq per 1000",
+       title = "1-week ahead forecasts with uncertainty intervals") +
+  scale_color_manual(
+    name = "Uncertainty",
+    values = c(
+      "90% CI" = "#6baed6",    # Medium blue
+      "80% CI" = "#08519c" ,    # Dark blue
+      "50% CI" = "blue",    # Very light blue
+      "Forecast" = "blue",    # Dark blue (matches 50% CI)
+      "Observed" = "red"     # Red
+    ),
+    breaks = c("90% CI", "80% CI", "50% CI", "Forecast", "Observed")  # Control legend order
+  ) +
+  scale_y_continuous(limits = c(0, 400)) +
+  theme_minimal() +
+  theme(
+    legend.position = "top",
+    axis.title = element_text(size = 18),
+    axis.text = element_text(size = 18),
+    legend.text = element_text(size = 14),
+    plot.title = element_text(size = 16, face = "bold")
+  ) +
+  scale_x_date(date_breaks = "2 month", date_labels = "%b %Y")
+
+print(Q3)
+
+# 2-WEEK AHEAD - Infectious_Mosq_1000
+plot_data8 <- map_dfr(1:num_iterations, ~ {
+  forecast_data <- results[[.x]]$infectious_per_1000_q_2
+  data.frame(
+    Iteration = .x,
+    Date = forecast_2week_dates[.x],
+    #50% CI 
+    Lower_50 = forecast_data[["25%"]],
+    Upper_50 = forecast_data[["75%"]],
+    # 90% CI
+    Lower_90 = forecast_data[["5%"]],
+    Upper_90 = forecast_data[["95%"]],
+    # 80% CI 
+    Lower_80 = forecast_data[["10%"]],
+    Upper_80 = forecast_data[["90%"]],
+    
+    # Median
+    Median = forecast_data[["50%"]]
+  )
+})
+
+df_observed_Infectious_Mosq_1000_2week <- data.frame(
+  Date = forecast_2week_dates,
+  X_real = X_obs2[7:52],
+  Type = "Observed"
+)
+
+Q4 <- ggplot() +
+  # 50% CI - lightest gray, thickest
+  geom_linerange(data = plot_data8,
+                 aes(x = as.Date(Date), ymin = Lower_50, ymax = Upper_50, color = "50% CI"),
+                 linewidth = 4, alpha = 0.3) +
+  # 90% CI - medium gray
+  geom_linerange(data = plot_data8,
+                 aes(x = as.Date(Date), ymin = Lower_90, ymax = Upper_90, color = "90% CI"),
+                 linewidth = 3, alpha = 0.5) +
+  # 80% CI - dark gray
+  geom_linerange(data = plot_data8,
+                 aes(x = as.Date(Date), ymin = Lower_80, ymax = Upper_80, color = "80% CI"),
+                 linewidth = 2, alpha = 0.7) +
+  # Median forecast points
+  geom_point(data = plot_data8,
+             aes(x = as.Date(Date), y = Median, color = "Forecast"),
+             size = 3) +
+  # Observed data
+  geom_line(data = df_observed_Infectious_Mosq_1000_2week,
+            aes(x = as.Date(Date), y = X_real, color = "Observed"),
+            linewidth = 1.5) +
+  labs(x = "Date", y = "Infectious Mosq per 1000",
+       title = "2-week ahead forecasts with uncertainty intervals") +
+  scale_color_manual(
+    name = "Uncertainty",
+    values = c(
+      "90% CI" = "#636363",    # Medium gray
+      "80% CI" = "#252525",    # Very dark gray
+      "50% CI" = "black",    # Light gray
+      "Forecast" = "black",  # Black
+      "Observed" = "red"   # Red
+    ),
+    breaks = c( "90% CI", "80% CI", "50% CI", "Forecast", "Observed")
+  ) +
+  scale_y_continuous(limits = c(0, 400)) +
+  theme_minimal() +
+  theme(
+    legend.position = "top",
+    axis.title = element_text(size = 18),
+    axis.text = element_text(size = 18),
+    legend.text = element_text(size = 14),
+    plot.title = element_text(size = 16, face = "bold")
+  ) +
+  scale_x_date(date_breaks = "2 month", date_labels = "%b %Y")
+
+print(Q4)
+# 1-WEEK AHEAD - Total Abundance
+plot_data5 <- map_dfr(1:num_iterations, ~ {
+  forecast_data <- results[[.x]]$total_abundance_q_1
+  data.frame(
+    Iteration = .x,
+    Date = forecast_1week_dates[.x],
+    #50% CI 
+    Lower_50 = forecast_data[["25%"]],
+    Upper_50 = forecast_data[["75%"]],
+    # 90% CI
+    Lower_90 = forecast_data[["5%"]],
+    Upper_90 = forecast_data[["95%"]],
+    # 80% CI 
+    Lower_80 = forecast_data[["10%"]],
+    Upper_80 = forecast_data[["90%"]],
+    
+    # Median
+    Median = forecast_data[["50%"]]
+  )
+})
+
+df_observed_abundance_1week <- data.frame(
+  Date = forecast_1week_dates,
+  X_real = X_obs1[6:51],
+  Type = "Observed"
+)
+
+Q5 = ggplot() +
+  # 50% CI - outermost, thickest, most transparent
+  geom_linerange(data = plot_data5,
+                 aes(x = as.Date(Date), ymin = Lower_50, ymax = Upper_50, color = "50% CI"),
+                 linewidth = 3, alpha = 0.3) +
+  # 90% CI - innermost, thinnest, least transparent
+  geom_linerange(data = plot_data5,
+                 aes(x = as.Date(Date), ymin = Lower_90, ymax = Upper_90, color = "90% CI"),
+                 linewidth = 1.5, alpha = 0.7) +
+  # 80% CI - middle layer
+  geom_linerange(data = plot_data5,
+                 aes(x = as.Date(Date), ymin = Lower_80, ymax = Upper_80, color = "80% CI"),
+                 linewidth = 2, alpha = 0.5) +
+  # Median point
+  geom_point(data = plot_data5,
+             aes(x = as.Date(Date), y = Median, color = "Forecast"),
+             size = 2) +
+  # Observed data
+  geom_line(data = df_observed_abundance_1week,
+            aes(x = as.Date(Date), y = X_real, color = "Observed"),
+            linewidth = 1) +
+  labs(x = "Date", y = "Total Abundance",
+       title = "1-week ahead forecasts with uncertainty intervals") +
+  scale_color_manual(
+    name = "Uncertainty",
+    values = c(
+      "90% CI" = "#6baed6",    # Medium blue
+      "80% CI" = "#08519c" ,    # Dark blue
+      "50% CI" = "blue",    # Very light blue
+      "Forecast" = "blue",    # Dark blue (matches 50% CI)
+      "Observed" = "red"     # Red
+    ),
+    breaks = c("90% CI", "80% CI", "50% CI",  "Forecast", "Observed")  # Control legend order
+  ) +
+  scale_y_continuous(limits = c(0, 6500)) +
+  theme_minimal() +
+  theme(
+    legend.position = "top",
+    axis.title = element_text(size = 18),
+    axis.text = element_text(size = 18),
+    legend.text = element_text(size = 14),
+    plot.title = element_text(size = 16, face = "bold")
+  ) +
+  scale_x_date(date_breaks = "2 month", date_labels = "%b %Y")
+
+# 2-WEEK AHEAD - Total Abundance
+plot_data6 <- map_dfr(1:num_iterations, ~ {
+  forecast_data <- results[[.x]]$total_abundance_q_2
+  data.frame(
+    Iteration = .x,
+    Date = forecast_2week_dates[.x],
+    #50% CI 
+    Lower_50 = forecast_data[["25%"]],
+    Upper_50 = forecast_data[["75%"]],
+    # 90% CI
+    Lower_90 = forecast_data[["5%"]],
+    Upper_90 = forecast_data[["95%"]],
+    # 80% CI 
+    Lower_80 = forecast_data[["10%"]],
+    Upper_80 = forecast_data[["90%"]],
+    
+    # Median
+    Median = forecast_data[["50%"]]
+  )
+})
+
+df_observed_abundance_2week <- data.frame(
+  Date = forecast_2week_dates,
+  X_real = X_obs1[7:52],
+  Type = "Observed"
+)
+
+Q6 =  ggplot() +
+  # 50% CI - lightest gray, thickest
+  geom_linerange(data = plot_data6,
+                 aes(x = as.Date(Date), ymin = Lower_50, ymax = Upper_50, color = "50% CI"),
+                 linewidth = 4, alpha = 0.3) +
+  # 90% CI - medium gray
+  geom_linerange(data = plot_data6,
+                 aes(x = as.Date(Date), ymin = Lower_90, ymax = Upper_90, color = "90% CI"),
+                 linewidth = 3, alpha = 0.5) +
+  # 80% CI - dark gray
+  geom_linerange(data = plot_data6,
+                 aes(x = as.Date(Date), ymin = Lower_80, ymax = Upper_80, color = "80% CI"),
+                 linewidth = 2, alpha = 0.7) +
+  # Median forecast points
+  geom_point(data = plot_data6,
+             aes(x = as.Date(Date), y = Median, color = "Forecast"),
+             size = 3) +
+  # Observed data
+  geom_line(data = df_observed_abundance_2week,
+            aes(x = as.Date(Date), y = X_real, color = "Observed"),
+            linewidth = 1.5) +
+  labs(x = "Date", y = "Total Abundance",
+       title = "2-week ahead forecasts with uncertainty intervals") +
+  scale_color_manual(
+    name = "Uncertainty",
+    values = c(
+      "90% CI" = "#636363",    # Medium gray
+      "80% CI" = "#252525",    # Very dark gray
+      "50% CI" = "black",    # Light gray
+      "Forecast" = "black",  # Black
+      "Observed" = "red"   # Red
+    ),
+    breaks = c("90% CI", "80% CI", "50% CI", "Forecast", "Observed")
+  ) +
+  scale_y_continuous(limits = c(0, 6500)) +
+  theme_minimal() +
+  theme(
+    legend.position = "top",
+    axis.title = element_text(size = 18),
+    axis.text = element_text(size = 18),
+    legend.text = element_text(size = 14),
+    plot.title = element_text(size = 16, face = "bold")
+  ) +
+  scale_x_date(date_breaks = "2 month", date_labels = "%b %Y")
+
+
+ggsave(paste0("Q1_iteration0FULL_", iteration, "_", Year, ".png"), plot = Q1, width = 10, height = 8, dpi = 300)
+ggsave(paste0("Q2_iteration0FULL_", iteration, "_", Year, ".png"), plot = Q2, width = 10, height = 8, dpi = 300)
+ggsave(paste0("Q3_iteration0FULL_", iteration, "_", Year, ".png"), plot = Q3, width = 10, height = 8, dpi = 300)
+ggsave(paste0("Q4_iteration0FULL_", iteration, "_", Year, ".png"), plot = Q4, width = 10, height = 8, dpi = 300)
+ggsave(paste0("Q5_iteration0FULL_", iteration, "_", Year, ".png"), plot = Q5, width = 10, height = 8, dpi = 300)
+ggsave(paste0("Q6_iteration0FULL_", iteration, "_", Year, ".png"), plot = Q6, width = 10, height = 8, dpi = 300)
+
+
+#####################################
+## FluSight-Style Fan Chart Plot   ##
+## Two-week forward forecast fans  ##
+#####################################
+
+plot_flusight_style <- function(results,
+                                forecast_1week_dates,
+                                forecast_2week_dates,
+                                actual_data,
+                                target = "total_abundance",
+                                quantile_levels = c(0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3,
+                                                    0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7,
+                                                    0.75, 0.8, 0.85, 0.9, 0.95, 0.975, 0.99),
+                                model_name = "SEIR Model",
+                                # Which forecast origins to plot fans for (NULL = all)
+                                # e.g. plot_every_n = 4 plots every 4th forecast to avoid clutter
+                                plot_every_n = 1) {
+  
+  n_iterations <- length(results)
+  
+  # Select which iterations to plot fans for
+  iter_to_plot <- seq(1, n_iterations, by = plot_every_n)
+  
+  # Build a long data frame of fan segments
+  # Each "fan" = one forecast origin, with horizon 1 and horizon 2 as two x-positions
+  fan_rows <- list()
+  
+  for (i in iter_to_plot) {
+    for (horizon in c(1, 2)) {
+      key  <- paste0(target, "_q_", horizon)
+      qs   <- results[[i]][[key]]
+      
+      if (is.null(qs) || all(is.na(qs))) next
+      
+      target_date <- if (horizon == 1) forecast_1week_dates[i] else forecast_2week_dates[i]
+      origin_date <- forecast_1week_dates[i] - 7   # one week before the 1-week-ahead date
+      
+      fan_rows[[length(fan_rows) + 1]] <- data.frame(
+        origin_date  = origin_date,
+        target_date  = target_date,
+        horizon      = horizon,
+        iteration    = i,
+        q_0.025      = qs[which(abs(quantile_levels - 0.025) < 1e-9)],
+        q_0.05       = qs[which(abs(quantile_levels - 0.05)  < 1e-9)],
+        q_0.10       = qs[which(abs(quantile_levels - 0.10)  < 1e-9)],
+        q_0.25       = qs[which(abs(quantile_levels - 0.25)  < 1e-9)],
+        q_0.50       = qs[which(abs(quantile_levels - 0.50)  < 1e-9)],
+        q_0.75       = qs[which(abs(quantile_levels - 0.75)  < 1e-9)],
+        q_0.90       = qs[which(abs(quantile_levels - 0.90)  < 1e-9)],
+        q_0.95       = qs[which(abs(quantile_levels - 0.95)  < 1e-9)],
+        q_0.975      = qs[which(abs(quantile_levels - 0.975) < 1e-9)],
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+  
+  fan_df <- bind_rows(fan_rows)
+  
+  # For each forecast origin, build the fan polygon:
+  # The fan connects origin_date (at the observed value or median) through horizon 1 and horizon 2
+  # We'll draw ribbons at each horizon (stacked shading per PI level)
+  
+  # Prepare actual data
+  if (is.vector(actual_data)) {
+    actual_df <- tibble(
+      date   = c(forecast_1week_dates - 7, forecast_1week_dates),  # rough alignment
+      actual = actual_data
+    )
+  } else {
+    actual_df <- actual_data  # expects columns: date, actual
+  }
+  
+  # Target label
+  target_name <- dplyr::case_when(
+    target == "total_abundance"    ~ "Total Mosquito Abundance",
+    target == "infectious_per_1000" ~ "Infected Mosquitoes per 1000",
+    target == "human_cases"        ~ "Human Cases",
+    TRUE ~ target
+  )
+  
+  # ---- Build fan polygon data ----
+  # For each origin, we create ribbon segments connecting origin->h1->h2
+  # We need to build "wide" segments: for each forecast group (origin), 
+  # create a ribbon from h1 to h2 at each PI level.
+  
+  fan_wide <- fan_df %>%
+    dplyr::group_by(origin_date, iteration) %>%
+    dplyr::arrange(horizon) %>%
+    dplyr::summarise(
+      date_h1    = target_date[horizon == 1],
+      date_h2    = target_date[horizon == 2],
+      # 90% PI
+      lo90_h1 = q_0.05[horizon == 1], hi90_h1 = q_0.95[horizon == 1],
+      lo90_h2 = q_0.05[horizon == 2], hi90_h2 = q_0.95[horizon == 2],
+      # 80% PI
+      lo80_h1 = q_0.10[horizon == 1],  hi80_h1 = q_0.90[horizon == 1],
+      lo80_h2 = q_0.10[horizon == 2],  hi80_h2 = q_0.90[horizon == 2],
+      # 50% PI
+      lo50_h1 = q_0.25[horizon == 1],  hi50_h1 = q_0.75[horizon == 1],
+      lo50_h2 = q_0.25[horizon == 2],  hi50_h2 = q_0.75[horizon == 2],
+      # medians
+      med_h1  = q_0.50[horizon == 1],
+      med_h2  = q_0.50[horizon == 2],
+      .groups = "drop"
+    ) %>%
+    dplyr::filter(!is.na(date_h2))  # keep only origins with both horizons
+  
+  # Melt to long for ribbons: each row = (origin, date, lo, hi, level)
+  make_ribbon_long <- function(df, lo_h1, hi_h1, lo_h2, hi_h2, level) {
+    bind_rows(
+      df %>% transmute(origin_date, iteration, date = date_h1,
+                       ymin = !!sym(lo_h1), ymax = !!sym(hi_h1), level = level),
+      df %>% transmute(origin_date, iteration, date = date_h2,
+                       ymin = !!sym(lo_h2), ymax = !!sym(hi_h2), level = level)
+    ) %>% arrange(origin_date, iteration, date)
+  }
+  
+  ribbon_90 <- make_ribbon_long(fan_wide, "lo90_h1","hi90_h1","lo90_h2","hi90_h2", "90%")
+  ribbon_80 <- make_ribbon_long(fan_wide, "lo80_h1","hi80_h1","lo80_h2","hi80_h2", "80%")
+  ribbon_50 <- make_ribbon_long(fan_wide, "lo50_h1","hi50_h1","lo50_h2","hi50_h2", "50%")
+  
+  median_long <- bind_rows(
+    fan_wide %>% transmute(origin_date, iteration, date = date_h1, median = med_h1),
+    fan_wide %>% transmute(origin_date, iteration, date = date_h2, median = med_h2)
+  ) %>% arrange(origin_date, iteration, date)
+  
+  # PI colours (blue shades, lightest = widest, like FluSight)
+  pi_colors <- c("90%" = "#BDD7EE", "80%" = "#9DC3E6", "50%" = "#2E75B6")
+  pi_alphas <- c("90%" = 0.5,       "80%" = 0.6,       "50%" = 0.8)
+  
+  # ---- Plot ----
+  p <- ggplot() 
+  # Draw fan ribbons per origin (group by iteration so each fan is separate)
+  for (lvl in c("90%", "80%", "50%")) {
+    rdf <- switch(lvl,
+                  "90%" = ribbon_90,
+                  "80%" = ribbon_80,
+                  "50%" = ribbon_50)
+    p <- p + geom_ribbon(
+      data = rdf,
+      aes(x = date, ymin = ymin, ymax = ymax, group = interaction(origin_date, iteration)),
+      fill  = pi_colors[lvl],
+      alpha = pi_alphas[lvl]
+    )
+  }
+  
+  # Median forecast line per origin
+  p <- p + geom_line(
+    data = median_long,
+    aes(x = date, y = median, group = interaction(origin_date, iteration)),
+    color = "#1F4E79", linewidth = 0.8, alpha = 0.8
+  ) +
+    geom_point(
+      data = median_long,
+      aes(x = date, y = median, group = interaction(origin_date, iteration)),
+      color = "#1F4E79", size = 1.5, alpha = 0.9
+    )
+  #Observed data on top so it's never obscured
+  p <- p +
+    geom_line(data = actual_df,
+              aes(x = date, y = actual),
+              color = "black", linewidth = 1, alpha = 0.9) +
+    geom_point(data = actual_df,
+               aes(x = date, y = actual),
+               color = "black", size = 1.5)
+  # Manual legend for PI levels (mimics FluSight style)
+  # Use dummy data for the legend
+  legend_df <- data.frame(
+    x    = as.Date(NA), xend = as.Date(NA),
+    y    = NA_real_,    yend = NA_real_,
+    fill = factor(c("90%", "80%", "50%"), levels = c("90%", "80%", "50%"))
+  )
+  
+  p <- p +
+    # Invisible ribbons just to get legend entries
+    geom_rect(data = data.frame(level = factor(c("90%","80%","50%"),
+                                               levels = c("90%","80%","50%"))),
+              aes(xmin = as.Date(-Inf), xmax = as.Date(-Inf),
+                  ymin = -Inf, ymax = -Inf, fill = level)) +
+    scale_fill_manual(
+      name   = "Uncertainty",
+      values = pi_colors,
+      guide  = guide_legend(override.aes = list(alpha = 1))
+    ) +
+    labs(
+      title    = paste0(target_name, " - ", model_name),
+      subtitle = "2-week ahead forecasts at each forecast origin",
+      x = "Date",
+      y = "Count"
+    ) +
+    theme_bw(base_size = 14) +
+    theme(
+      legend.position   = "right",
+      axis.title = element_text(size = 17),
+      axis.text = element_text(size = 17),
+      legend.text = element_text(size = 15),
+      legend.title      = element_text(size = 17, face = "bold"),
+      panel.grid.minor  = element_blank(),
+      plot.title        = element_text(face = "bold",  size = 17),
+      plot.subtitle     = element_text(color = "grey40", size = 14)
+    )
+  
+  return(p)
+}
+
+
+#####################################
+## Usage                           ##
+#####################################
+
+# Build actual_df from your variables
+actual_df <- tibble(
+  date   = observed_dates,   # all_weeks
+  actual = X_obs1             # X_obs1 = X_obs
+)
+
+# --- Total Abundance ---
+p_abundance <- plot_flusight_style(
+  results              = results,
+  forecast_1week_dates = forecast_1week_dates,
+  forecast_2week_dates = forecast_2week_dates,
+  actual_data          = actual_df,
+  target               = "total_abundance",
+  model_name           = "FullModel",
+  plot_every_n         = 4   # increase (e.g. 4) if fans overlap too much
+)
+print(p_abundance)
+# Build actual_df from your variables
+actual_df <- tibble(
+  date   = observed_dates,   # all_weeks
+  actual = X_obs2             # X_obs1 = X_obs
+)
+# --- Infectious per 1000 ---
+# (swap actual_df$actual to your infectious observed vector if different)
+p_infected <- plot_flusight_style(
+  results              = results,
+  forecast_1week_dates = forecast_1week_dates,
+  forecast_2week_dates = forecast_2week_dates,
+  actual_data          = actual_df,
+  target               = "infectious_per_1000",
+  model_name           = "FullModel",
+  plot_every_n         = 4
+)
+print(p_infected)
+# Build actual_df from your variables
+actual_df <- tibble(
+  date   = observed_dates,   # all_weeks
+  actual = X0_obs[1:52]             # X_obs1 = X_obs
+)
+# --- Human Cases ---
+p_cases <- plot_flusight_style(
+  results              = results,
+  forecast_1week_dates = forecast_1week_dates,
+  forecast_2week_dates = forecast_2week_dates,
+  actual_data          = actual_df,
+  target               = "human_cases",
+  model_name           = "FullModel",
+  plot_every_n         = 4
+)
+print(p_cases)
+
+# Save plot 
+ggsave("f_abundance_FullModel.png", p_abundance, width = 11, height = 6, dpi = 300)
+ggsave("f_infectious_per_1000_FullModel.png", p_infected, width = 11, height = 6, dpi = 300)
+ggsave("f_Humancases_FullModel", p_cases, width = 11, height = 6, dpi = 300)
+
+
+
+
+
+# ============================================================
+# Multi-Year Panel Plotting Script
+# FullModel_NoClimate - Fit + Forecast + FluSight Fan Charts
+# Targets: Total Abundance, Infectious Mosq per 1000, Human Cases
+# Years: 2006-2019, 2021 (15 years total)
+#
+# NOTE: This script only loads observation data and RDS results.
+#       It does NOT re-run the EnKF or forecasting model.
+#       All RDS files must already exist before running this script.
+# ============================================================
+
+library(tidyverse)
+library(dplyr)
+library(purrr)
+library(ggplot2)
+library(gridExtra)
+library(grid)
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+years      <- c(2006:2019, 2021)
+model_name <- "FullModel"
+N_ens      <- 8000
+
+# Y-axis limits applied to 2006-2019 only; 2021 gets no limit
+y_limits_fit <- list(
+  total_abundance     = c(0, 6500),
+  infectious_per_1000 = c(0, 40),     # <-- tighter for fit
+  human_cases         = c(0, 260)
+)
+
+y_limits_forecast <- list(
+  total_abundance     = c(0, 6500),
+  infectious_per_1000 = c(0, 400),    # <-- wider for forecast/fansight
+  human_cases         = c(0, 260)
+)
+
+# ============================================================
+# EXACT DATA LOADING  -  mirrors your original year-specific
+# data loading block precisely, including all padding logic
+# Returns: list(X_obs1, X_obs2, X0_obs, all_weeks,
+#               forecast_1week_dates, forecast_2week_dates)
+# ============================================================
+
+load_year_data <- function(Year) {
+  
+  if (Year == 2021) {
+    mosq_pools_agg  <- read.csv("./mosq_pools_agg_2021.csv")
+    X_obs           <- as.numeric(mosq_pools_agg$Tot_Mosq_Abund)
+    mosq_pools_data <- read.csv("./mosq_pools_data_2021.csv")
+    X2_obs          <- as.numeric(mosq_pools_data$Inf_Mosq_Per_1000)
+    WNV             <- read.csv("./WNV_humans_summary3.csv")
+    X3_obs          <- WNV %>% filter(YEAR == 2021)
+    X3_obs          <- X3_obs[-1, ]
+    X3_obs          <- cumsum(as.numeric(X3_obs$cases))
+    training_start_date <- as.Date("2021-01-01")
+    
+  } else if (Year == 2019) {
+    mosq_pools_agg  <- read.csv("./mosq_pools_data_2019.csv")
+    X_obs           <- as.numeric(c(0, mosq_pools_agg$Tot_Mosq_Abund, 0))
+    mosq_pools_data <- read.csv("./mosq_pools_data_2019.csv")
+    X2_obs          <- as.numeric(c(0, mosq_pools_data$Inf_Mosq_Per_1000, 0))
+    WNV             <- read.csv("./WNV_humans_summary3_2018-2019.csv")
+    X3_obs          <- WNV %>% filter(YEAR == 2019)
+    X3_obs          <- X3_obs[-1, ]
+    X3_obs          <- as.numeric(X3_obs$cases)
+    X3_obs[which(X3_obs == 1)[1]] <- 0
+    X3_obs          <- cumsum(X3_obs)
+    training_start_date <- as.Date("2019-01-01")
+    
+  } else if (Year == 2018) {
+    mosq_pools_agg  <- read.csv("./mosq_pools_data_2018-2019.csv")
+    X_obs_raw       <- as.numeric(as.data.frame(mosq_pools_agg %>% filter(Year == 2018))$Tot_Mosq_Abund)
+    mosq_agg0       <- read.csv("./temp_csv_2018.csv")
+    X_obs0          <- as.numeric(mosq_agg0$Tot_Mosq_Abund)
+    X_obs           <- as.numeric(c(0, X_obs0, X_obs_raw, 0))
+    mosq_pools_data <- read.csv("./mosq_pools_data_2018-2019.csv")
+    X2_obs_raw      <- as.numeric(as.data.frame(mosq_pools_data %>% filter(Year == 2018))$Inf_Mosq_Per_1000)
+    X2_obs          <- as.numeric(c(rep(0, 22), X2_obs_raw, 0))
+    WNV             <- read.csv("./WNV_humans_summary3_2018-2019.csv")
+    X3_obs          <- WNV %>% filter(YEAR == 2018)
+    X3_obs          <- X3_obs[1:52, ]
+    X3_obs          <- cumsum(as.numeric(X3_obs$cases))
+    training_start_date <- as.Date("2018-01-01")
+    
+  } else if (Year == 2017) {
+    mosq_pools_agg  <- read.csv("./mosq_pools_data.csv")
+    X_obs           <- as.numeric(c(as.data.frame(mosq_pools_agg %>% filter(Year == 2017))$Tot_Mosq_Abund, 0, 0))
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs          <- as.numeric(c(as.data.frame(mosq_pools_data %>% filter(Year == 2017))$Inf_Mosq_Per_1000, 0, 0))
+    WNV             <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs          <- WNV %>% filter(YEAR == 2017)
+    X3_obs          <- X3_obs[-1, ]
+    X3_obs          <- cumsum(as.numeric(X3_obs$cases))
+    training_start_date <- as.Date("2017-01-01")
+    
+  } else if (Year == 2016) {
+    mosq_pools_agg  <- read.csv("./mosq_pools_data.csv")
+    X_obs           <- as.numeric(as.data.frame(mosq_pools_agg %>% filter(Year == 2016))$Tot_Mosq_Abund)
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs          <- as.numeric(as.data.frame(mosq_pools_data %>% filter(Year == 2016))$Inf_Mosq_Per_1000)
+    WNV             <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs          <- WNV %>% filter(YEAR == 2016)
+    X3_obs          <- X3_obs[-1, ]
+    X3_obs          <- cumsum(as.numeric(X3_obs$cases))
+    training_start_date <- as.Date("2016-01-01")
+    
+  } else if (Year == 2015) {
+    mosq_pools_agg  <- read.csv("./mosq_pools_data.csv")
+    X_obs           <- as.numeric(c(as.data.frame(mosq_pools_agg %>% filter(Year == 2015))$Tot_Mosq_Abund, 0))
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs          <- as.numeric(c(as.data.frame(mosq_pools_data %>% filter(Year == 2015))$Inf_Mosq_Per_1000, 0))
+    WNV             <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs          <- WNV %>% filter(YEAR == 2015)
+    X3_obs          <- X3_obs[-1, ]
+    X3_obs          <- cumsum(as.numeric(X3_obs$cases))
+    training_start_date <- as.Date("2015-01-01")
+    
+  } else if (Year == 2014) {
+    mosq_pools_agg  <- read.csv("./mosq_pools_data.csv")
+    X_obs           <- as.numeric(c(as.data.frame(mosq_pools_agg %>% filter(Year == 2014))$Tot_Mosq_Abund, 0))
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs          <- as.numeric(c(as.data.frame(mosq_pools_data %>% filter(Year == 2014))$Inf_Mosq_Per_1000, 0))
+    WNV             <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs          <- WNV %>% filter(YEAR == 2014)
+    X3_obs          <- X3_obs[-1, ]
+    X3_obs          <- cumsum(as.numeric(X3_obs$cases))
+    training_start_date <- as.Date("2014-01-01")
+    
+  } else if (Year == 2013) {
+    mosq_pools_agg  <- read.csv("./mosq_pools_data.csv")
+    X_obs           <- as.numeric(c(as.data.frame(mosq_pools_agg %>% filter(Year == 2013))$Tot_Mosq_Abund, 0))
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs          <- as.numeric(c(as.data.frame(mosq_pools_data %>% filter(Year == 2013))$Inf_Mosq_Per_1000, 0))
+    WNV             <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs          <- WNV %>% filter(YEAR == 2013)
+    X3_obs          <- X3_obs[-1, ]
+    X3_obs          <- cumsum(as.numeric(X3_obs$cases))
+    training_start_date <- as.Date("2013-01-01")
+    
+  } else if (Year == 2012) {
+    mosq_pools_agg  <- read.csv("./mosq_pools_data.csv")
+    X_obs           <- as.numeric(as.data.frame(mosq_pools_agg %>% filter(Year == 2012))$Tot_Mosq_Abund)
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs          <- as.numeric(as.data.frame(mosq_pools_data %>% filter(Year == 2012))$Inf_Mosq_Per_1000)
+    WNV             <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs          <- WNV %>% filter(YEAR == 2012)
+    # NOTE: 2012 does NOT drop first row (matches your original code)
+    X3_obs          <- cumsum(as.numeric(X3_obs$cases))
+    training_start_date <- as.Date("2012-01-01")
+    
+  } else if (Year == 2011) {
+    mosq_pools_agg  <- read.csv("./mosq_pools_data.csv")
+    X_obs           <- as.numeric(c(as.data.frame(mosq_pools_agg %>% filter(Year == 2011))$Tot_Mosq_Abund, 0))
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs          <- as.numeric(c(as.data.frame(mosq_pools_data %>% filter(Year == 2011))$Inf_Mosq_Per_1000, 0))
+    WNV             <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs          <- WNV %>% filter(YEAR == 2011)
+    X3_obs          <- X3_obs[-1, ]
+    X3_obs          <- cumsum(as.numeric(X3_obs$cases))
+    training_start_date <- as.Date("2011-01-01")
+    
+  } else if (Year == 2010) {
+    mosq_pools_agg  <- read.csv("./mosq_pools_data.csv")
+    X_obs           <- as.numeric(as.data.frame(mosq_pools_agg %>% filter(Year == 2010))$Tot_Mosq_Abund)
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs          <- as.numeric(as.data.frame(mosq_pools_data %>% filter(Year == 2010))$Inf_Mosq_Per_1000)
+    WNV             <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs          <- WNV %>% filter(YEAR == 2010)
+    X3_obs          <- X3_obs[-1, ]
+    X3_obs          <- cumsum(as.numeric(X3_obs$cases))
+    training_start_date <- as.Date("2010-01-01")
+    
+  } else if (Year == 2009) {
+    mosq_pools_agg  <- read.csv("./mosq_pools_data.csv")
+    X_obs           <- as.numeric(as.data.frame(mosq_pools_agg %>% filter(Year == 2009))$Tot_Mosq_Abund)
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs          <- as.numeric(as.data.frame(mosq_pools_data %>% filter(Year == 2009))$Inf_Mosq_Per_1000)
+    WNV             <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs          <- WNV %>% filter(YEAR == 2009)
+    X3_obs          <- X3_obs[-1, ]
+    X3_obs          <- cumsum(as.numeric(X3_obs$cases))
+    training_start_date <- as.Date("2009-01-01")
+    
+  } else if (Year == 2008) {
+    mosq_pools_agg  <- read.csv("./mosq_pools_data.csv")
+    X_obs           <- as.numeric(as.data.frame(mosq_pools_agg %>% filter(Year == 2008))$Tot_Mosq_Abund)
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs          <- as.numeric(as.data.frame(mosq_pools_data %>% filter(Year == 2008))$Inf_Mosq_Per_1000)
+    WNV             <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs          <- WNV %>% filter(YEAR == 2008)
+    X3_obs          <- X3_obs[-1, ]
+    X3_obs          <- cumsum(as.numeric(X3_obs$cases))
+    training_start_date <- as.Date("2008-01-01")
+    
+  } else if (Year == 2007) {
+    mosq_pools_agg  <- read.csv("./mosq_pools_data.csv")
+    X_obs           <- as.numeric(c(as.data.frame(mosq_pools_agg %>% filter(Year == 2007))$Tot_Mosq_Abund, 0, 0))
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs          <- as.numeric(c(as.data.frame(mosq_pools_data %>% filter(Year == 2007))$Inf_Mosq_Per_1000, 0, 0))
+    WNV             <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs          <- WNV %>% filter(YEAR == 2007)
+    X3_obs          <- X3_obs[-1, ]
+    X3_obs          <- cumsum(as.numeric(X3_obs$cases))
+    training_start_date <- as.Date("2007-01-01")
+    
+  } else if (Year == 2006) {
+    mosq_pools_agg  <- read.csv("./mosq_pools_data.csv")
+    X_obs           <- as.numeric(as.data.frame(mosq_pools_agg %>% filter(Year == 2006))$Tot_Mosq_Abund)
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs          <- as.numeric(as.data.frame(mosq_pools_data %>% filter(Year == 2006))$Inf_Mosq_Per_1000)
+    WNV             <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs          <- WNV %>% filter(YEAR == 2006)
+    # NOTE: 2006 does NOT drop first row (matches your original code)
+    X3_obs          <- cumsum(as.numeric(X3_obs$cases))
+    training_start_date <- as.Date("2006-01-01")
+    
+  } else {
+    stop("Year must be one of: 2006-2019 or 2021")
+  }
+  
+  # ---- Pad / trim all obs vectors to exactly 52 weeks ----
+  pad52 <- function(x) {
+    if (length(x) < 52) x <- c(x, rep(0, 52 - length(x)))
+    x[1:52]
+  }
+  X_obs1 <- pad52(X_obs)
+  X_obs2 <- pad52(X2_obs)
+  X0_obs <- pad52(X3_obs)
+  
+  # ---- Date vectors (identical to your original code) ----
+  all_weeks            <- seq(training_start_date, by = "weeks", length.out = 52)
+  forecast_1week_dates <- all_weeks[6:51]
+  forecast_2week_dates <- all_weeks[7:52]
+  
+  list(
+    X_obs1               = X_obs1,
+    X_obs2               = X_obs2,
+    X0_obs               = X0_obs,
+    all_weeks            = all_weeks,
+    forecast_1week_dates = forecast_1week_dates,
+    forecast_2week_dates = forecast_2week_dates
+  )
+}
+
+# ============================================================
+# PLOT BUILDERS  (return single ggplot, no legend)
+# ============================================================
+
+# ---- FIT plot (from save_ensemble_full_global RDS) ----------
+
+make_fit_plot <- function(Year, target, d, apply_ylim) {
+  
+  rds_file <- paste0("save_ensemble_full_global_", model_name, "_", Year, ".rds")
+  if (!file.exists(rds_file)) { message("Missing: ", rds_file); return(NULL) }
+  ens     <- readRDS(rds_file)            # [18, 8000, 50]
+  n_weeks <- dim(ens)[3]
+  dates   <- d$all_weeks[1:n_weeks]
+  
+  obs_vec <- switch(target,
+                    total_abundance     = d$X_obs1[1:n_weeks],
+                    infectious_per_1000 = d$X_obs2[1:n_weeks],
+                    human_cases         = d$X0_obs[1:n_weeks]
+  )
+  
+  # Extract fitted quantiles week-by-week
+  pred_mat <- switch(target,
+                     total_abundance = {
+                       ens[1, 1:N_ens, ] + ens[2, 1:N_ens, ]
+                     },
+                     infectious_per_1000 = {
+                       sm  <- ens[1, 1:N_ens, ]; im <- ens[2, 1:N_ens, ]
+                       tot <- sm + im; tot[tot == 0] <- NA
+                       im / tot * 1000
+                     },
+                     human_cases = ens[8, 1:N_ens, ]
+  )
+  
+  qmat <- apply(pred_mat, 2, quantile,
+                probs = c(0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95),
+                na.rm = TRUE)
+  
+  df_rib <- data.frame(Date = dates,
+                       q05  = qmat[1,], q10 = qmat[2,], q25 = qmat[3,],
+                       q50  = qmat[4,],
+                       q75  = qmat[5,], q90 = qmat[6,], q95 = qmat[7,])
+  
+  df_obs <- data.frame(Date     = d$all_weeks[1:length(obs_vec)],
+                       Observed = obs_vec)
+  
+  ylab <- c(total_abundance     = "Total Abundance",
+            infectious_per_1000 = "Inf. Mosq. per 1000",
+            human_cases         = "Human Cases")[target]
+  
+  p <- ggplot(df_rib, aes(x = Date)) +
+    geom_ribbon(aes(ymin = q05, ymax = q95, fill = "90% CI"), alpha = 0.40) +
+    geom_ribbon(aes(ymin = q10, ymax = q90, fill = "80% CI"), alpha = 0.50) +
+    geom_ribbon(aes(ymin = q25, ymax = q75, fill = "50% CI"), alpha = 0.65) +
+    geom_line(aes(y = q50,         color = "Median fit"),  linewidth = 0.7) +
+    geom_point(data = df_obs,
+               aes(x = Date, y = Observed, color = "Observed"), size = 3) +
+    scale_fill_manual(name   = NULL,
+                      values = c("90% CI" = "#BDD7EE",
+                                 "80% CI" = "#5B9BD5",
+                                 "50% CI" = "#1F4E79")) +
+    scale_color_manual(name  = NULL,
+                       values = c("Median fit" = "#08306b",
+                                  "Observed"   = "red")) +
+    labs(x = NULL, y = ylab, title = as.character(Year)) +
+    theme_minimal(base_size = 9) +
+    theme(plot.title       = element_text(face = "bold", size = 17, hjust = 0.5),
+          axis.text.x      = element_text(angle = 45, hjust = 1, size = 17),
+          axis.text.y      = element_text(size = 17),
+          axis.title = element_text(size = 18),
+          axis.text = element_text(size = 18),
+          legend.position  = "none",
+          panel.grid.minor = element_blank())
+  
+  if (apply_ylim) p <- p + scale_y_continuous(limits = y_limits_fit[[target]])
+  p
+}
+# ---- FORECAST plot (1-wk or 2-wk ahead) --------------------
+
+make_forecast_plot <- function(Year, target, horizon, d, apply_ylim) {
+  
+  rds_file <- paste0("results_", model_name, "_", Year, ".rds")
+  if (!file.exists(rds_file)) { message("Missing: ", rds_file); return(NULL) }
+  results  <- readRDS(rds_file)
+  
+  q_key   <- paste0(target, "_q_", horizon)
+  fdates  <- if (horizon == 1) d$forecast_1week_dates else d$forecast_2week_dates
+  obs_idx <- if (horizon == 1) 6:51                   else 7:52
+  obs_vec <- switch(target,
+                    total_abundance     = d$X_obs1,
+                    infectious_per_1000 = d$X_obs2,
+                    human_cases         = d$X0_obs)
+  
+  plot_df <- map_dfr(seq_along(results), function(i) {
+    qs <- results[[i]][[q_key]]
+    if (is.null(qs)) return(NULL)
+    data.frame(
+      Date     = fdates[i],
+      Lower_90 = qs[["5%"]],  Upper_90 = qs[["95%"]],
+      Lower_80 = qs[["10%"]], Upper_80 = qs[["90%"]],
+      Lower_50 = qs[["25%"]], Upper_50 = qs[["75%"]],
+      Median   = qs[["50%"]]
+    )
+  })
+  
+  df_obs <- data.frame(Date     = fdates,
+                       Observed = obs_vec[obs_idx])
+  
+  ylab <- c(total_abundance     = "Total Abundance",
+            infectious_per_1000 = "Inf. Mosq. per 1000",
+            human_cases         = "Human Cases")[target]
+  
+  p <- ggplot(plot_df, aes(x = as.Date(Date))) +
+    geom_linerange(aes(ymin = Lower_90, ymax = Upper_90, color = "90% CI"),
+                   linewidth = 1.0, alpha = 0.45) +
+    geom_linerange(aes(ymin = Lower_80, ymax = Upper_80, color = "80% CI"),
+                   linewidth = 1.6, alpha = 0.55) +
+    geom_linerange(aes(ymin = Lower_50, ymax = Upper_50, color = "50% CI"),
+                   linewidth = 2.2, alpha = 0.70) +
+    geom_point(aes(y = Median, color = "Median forecast"), size = 3.0) +
+    geom_line(data = df_obs,
+              aes(x = as.Date(Date), y = Observed, color = "Observed"),
+              linewidth = 0.7) +
+    scale_color_manual(
+      name   = NULL,
+      values = c("90% CI"         = "#BDD7EE",
+                 "80% CI"         = "#5B9BD5",
+                 "50% CI"         = "#1F4E79",
+                 "Median forecast"= "#08306b",
+                 "Observed"       = "red"),
+      guide  = guide_legend(
+        override.aes = list(
+          linetype  = c("solid","solid","solid","solid","solid"),
+          linewidth = c(1.0, 1.6, 2.2, 0.5, 0.7),
+          shape     = c(NA, NA, NA, 16, NA)
+        )
+      )
+    ) +
+    labs(x = NULL, y = ylab, title = as.character(Year)) +
+    theme_minimal(base_size = 9) +
+    theme(plot.title       = element_text(face = "bold", size = 17, hjust = 0.5),
+          axis.text.x      = element_text(angle = 45, hjust = 1, size = 17),
+          axis.text.y      = element_text(size = 17),
+          axis.title = element_text(size = 18),
+          axis.text = element_text(size = 18),
+          legend.position  = "none",
+          panel.grid.minor = element_blank())
+  
+  if (apply_ylim) p <- p + scale_y_continuous(limits = y_limits_forecast[[target]])
+  p
+}
+
+# ---- FLUSIGHT fan chart plot --------------------------------
+
+make_fansight_plot <- function(Year, target, d, apply_ylim,
+                               plot_every_n = 4) {
+  
+  rds_file <- paste0("results_", model_name, "_", Year, ".rds")
+  if (!file.exists(rds_file)) { message("Missing: ", rds_file); return(NULL) }
+  results  <- readRDS(rds_file)
+  
+  f1 <- d$forecast_1week_dates
+  f2 <- d$forecast_2week_dates
+  obs_vec <- switch(target,
+                    total_abundance     = d$X_obs1,
+                    infectious_per_1000 = d$X_obs2,
+                    human_cases         = d$X0_obs)
+  
+  q_levels <- c(0.01,0.025,0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,
+                0.45,0.5,0.55,0.6,0.65,0.7,0.75,0.8,0.85,0.9,
+                0.95,0.975,0.99)
+  
+  iter_plot <- seq(1, length(results), by = plot_every_n)
+  fan_rows  <- list()
+  
+  for (i in iter_plot) {
+    for (h in c(1, 2)) {
+      qs <- results[[i]][[paste0(target, "_q_", h)]]
+      if (is.null(qs) || all(is.na(qs))) next
+      get_q <- function(p) { idx <- which(abs(q_levels - p) < 1e-9); if (!length(idx)) NA else as.numeric(qs[idx]) }
+      fan_rows[[length(fan_rows) + 1]] <- data.frame(
+        origin  = f1[i] - 7, iter = i, horizon = h,
+        tdate   = if (h == 1) f1[i] else f2[i],
+        lo90 = get_q(0.05), hi90 = get_q(0.95),
+        lo80 = get_q(0.10), hi80 = get_q(0.90),
+        lo50 = get_q(0.25), hi50 = get_q(0.75),
+        med  = get_q(0.50)
+      )
+    }
+  }
+  if (!length(fan_rows)) return(NULL)
+  fan_df <- bind_rows(fan_rows)
+  
+  fan_wide <- fan_df %>%
+    group_by(origin, iter) %>%
+    filter(n() == 2) %>%
+    summarise(
+      date_h1 = tdate[horizon==1],  date_h2 = tdate[horizon==2],
+      lo90_h1 = lo90[horizon==1],   hi90_h1 = hi90[horizon==1],
+      lo90_h2 = lo90[horizon==2],   hi90_h2 = hi90[horizon==2],
+      lo80_h1 = lo80[horizon==1],   hi80_h1 = hi80[horizon==1],
+      lo80_h2 = lo80[horizon==2],   hi80_h2 = hi80[horizon==2],
+      lo50_h1 = lo50[horizon==1],   hi50_h1 = hi50[horizon==1],
+      lo50_h2 = lo50[horizon==2],   hi50_h2 = hi50[horizon==2],
+      med_h1  = med[horizon==1],    med_h2  = med[horizon==2],
+      .groups = "drop"
+    ) %>% filter(!is.na(date_h2))
+  
+  make_rib <- function(df, lo1, hi1, lo2, hi2, lv)
+    bind_rows(
+      df %>% transmute(origin, iter, date = date_h1,
+                       ymin = !!sym(lo1), ymax = !!sym(hi1), level = lv),
+      df %>% transmute(origin, iter, date = date_h2,
+                       ymin = !!sym(lo2), ymax = !!sym(hi2), level = lv)
+    ) %>% arrange(origin, iter, date)
+  
+  r90 <- make_rib(fan_wide,"lo90_h1","hi90_h1","lo90_h2","hi90_h2","90% PI")
+  r80 <- make_rib(fan_wide,"lo80_h1","hi80_h1","lo80_h2","hi80_h2","80% PI")
+  r50 <- make_rib(fan_wide,"lo50_h1","hi50_h1","lo50_h2","hi50_h2","50% PI")
+  med_long <- bind_rows(
+    fan_wide %>% transmute(origin, iter, date = date_h1, med = med_h1),
+    fan_wide %>% transmute(origin, iter, date = date_h2, med = med_h2)
+  ) %>% arrange(origin, iter, date)
+  
+  obs_df <- data.frame(date   = d$all_weeks[1:length(obs_vec)],
+                       actual = obs_vec)
+  ylab <- c(total_abundance     = "Total Abundance",
+            infectious_per_1000 = "Inf. Mosq. per 1000",
+            human_cases         = "Human Cases")[target]
+  
+  p <- ggplot() +
+    geom_ribbon(data = r90,
+                aes(x = date, ymin = ymin, ymax = ymax,
+                    group = interaction(origin, iter), fill = "90% CI"), alpha = 0.40) +
+    geom_ribbon(data = r80,
+                aes(x = date, ymin = ymin, ymax = ymax,
+                    group = interaction(origin, iter), fill = "80% CI"), alpha = 0.55) +
+    geom_ribbon(data = r50,
+                aes(x = date, ymin = ymin, ymax = ymax,
+                    group = interaction(origin, iter), fill = "50% CI"), alpha = 0.70) +
+    geom_line(data = med_long,
+              aes(x = date, y = med, group = interaction(origin, iter),
+                  color = "Median forecast"),
+              linewidth = 0.5, alpha = 0.85) +
+    geom_point(
+      data = med_long,
+      aes(x = date, y = med, group = interaction(origin, iter)),
+      color = "black", size = 3.0, alpha = 0.9)+
+    geom_line(data = obs_df, aes(x = date, y = actual, color = "Observed"),
+              linewidth = 0.7) +
+    geom_point(data = obs_df,
+               aes(x = date, y = actual),
+               color = "red", size = 1.5)+
+    scale_fill_manual(name   = NULL,
+                      values = c("90% CI" = "#BDD7EE",
+                                 "80% CI" = "#5B9BD5",
+                                 "50% CI" = "#1F4E79")) +
+    scale_color_manual(name  = NULL,
+                       values = c("Observed"        = "red",
+                                  "Median forecast" = "black")) +
+    labs(x = NULL, y = ylab, title = as.character(Year)) +
+    theme_minimal(base_size = 9) +
+    theme(plot.title       = element_text(face = "bold", size = 17, hjust = 0.5),
+          axis.text.x      = element_text(angle = 45, hjust = 1, size = 17),
+          axis.text.y      = element_text(size = 17),
+          axis.title = element_text(size = 18),
+          axis.text = element_text(size = 18),
+          legend.position  = "none",
+          panel.grid.minor = element_blank())
+  
+  if (apply_ylim) p <- p + scale_y_continuous(limits = y_limits_forecast[[target]])
+  p
+}
+
+# ============================================================
+# LEGEND EXTRACTOR
+# Builds one "reference" plot with legend visible, extracts grob
+# ============================================================
+
+extract_shared_legend <- function(plot_type, target) {
+  
+  # Dummy data for a minimal reference plot
+  df_dummy <- data.frame(
+    Date     = seq(as.Date("2014-01-01"), by = "week", length.out = 10),
+    q05 = 1, q10 = 2, q25 = 3, q50 = 5, q75 = 7, q90 = 8, q95 = 9,
+    Observed = 5,
+    Lower_90 = 1, Upper_90 = 9,
+    Lower_80 = 2, Upper_80 = 8,
+    Lower_50 = 3, Upper_50 = 7,
+    Median   = 5
+  )
+  
+  if (plot_type == "fit") {
+    ref_p <- ggplot(df_dummy, aes(x = Date)) +
+      geom_ribbon(aes(ymin = q05, ymax = q95, fill = "90% CI"), alpha = 0.40) +
+      geom_ribbon(aes(ymin = q10, ymax = q90, fill = "80% CI"), alpha = 0.50) +
+      geom_ribbon(aes(ymin = q25, ymax = q75, fill = "50% CI"), alpha = 0.65) +
+      geom_line(aes(y = q50,      color = "Median fit"),  linewidth = 0.7) +
+      geom_point(aes(y = Observed, color = "Observed"), size = 3) +
+      scale_fill_manual(name   = NULL,
+                        values = c("90% CI" = "#BDD7EE",
+                                   "80% CI" = "#5B9BD5",
+                                   "50% CI" = "#1F4E79")) +
+      scale_color_manual(name  = NULL,
+                         values = c("Median fit" = "#08306b", "Observed" = "red")) +
+      theme_minimal() + theme(legend.position = "bottom",
+                              legend.text = element_text(size = 17))
+    
+  } else if (plot_type %in% c("forecast_1wk", "forecast_2wk")) {
+    ref_p <- ggplot(df_dummy, aes(x = Date)) +
+      geom_linerange(aes(ymin = Lower_90, ymax = Upper_90, color = "90% CI"), linewidth = 1.0) +
+      geom_linerange(aes(ymin = Lower_80, ymax = Upper_80, color = "80% CI"), linewidth = 1.6) +
+      geom_linerange(aes(ymin = Lower_50, ymax = Upper_50, color = "50% CI"), linewidth = 2.2) +
+      geom_point(aes(y = Median,   color = "Median forecast"), size = 3) +
+      geom_line(aes(y = Observed,  color = "Observed"),        linewidth = 0.7) +
+      scale_color_manual(
+        name   = NULL,
+        values = c("90% CI"          = "#BDD7EE",
+                   "80% CI"          = "#5B9BD5",
+                   "50% CI"          = "#1F4E79",
+                   "Median forecast" = "#08306b",
+                   "Observed"        = "red")
+      ) +
+      theme_minimal() + theme(legend.position = "bottom",
+                              legend.text = element_text(size = 17))
+    
+  } else {  # fansight
+    ref_p <- ggplot(df_dummy, aes(x = Date)) +
+      geom_ribbon(aes(ymin = Lower_90, ymax = Upper_90, fill = "90% CI"), alpha = 0.40) +
+      geom_ribbon(aes(ymin = Lower_80, ymax = Upper_80, fill = "80% CI"), alpha = 0.55) +
+      geom_ribbon(aes(ymin = Lower_50, ymax = Upper_50, fill = "50% CI"), alpha = 0.70) +
+      geom_line(aes(y = Observed,  color = "Observed"),         linewidth = 0.7) +
+      geom_line(aes(y = Median,    color = "Median forecast"),  linewidth = 0.7) +
+      scale_fill_manual(name   = NULL,
+                        values = c("90% CI" = "#BDD7EE",
+                                   "80% CI" = "#5B9BD5",
+                                   "50% CI" = "#1F4E79")) +
+      scale_color_manual(name  = NULL,
+                         values = c("Observed"        = "red",
+                                    "Median forecast" = "black")) +
+      theme_minimal() + theme(legend.position = "bottom",
+                              legend.text = element_text(size = 17))
+  }
+  
+  tmp  <- ggplot_gtable(ggplot_build(ref_p))
+  idx  <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  tmp$grobs[[idx]]
+}
+
+# ============================================================
+# MASTER PANEL BUILDER
+# plot_type: "fit" | "forecast_1wk" | "forecast_2wk" | "fansight"
+# ============================================================
+
+build_panel <- function(target, plot_type, save_dir = ".") {
+  
+  all_plots <- list()
+  
+  for (yr in years) {
+    message("  Year ", yr)
+    apply_ylim <- (yr != 2021)          # 2021 has no y-axis limit
+    
+    # --- Load observation data using your exact per-year logic ---
+    d <- tryCatch(
+      load_year_data(yr),
+      error = function(e) { message("  Data load failed for ", yr, ": ", e$message); NULL }
+    )
+    if (is.null(d)) { all_plots[[as.character(yr)]] <- NULL; next }
+    
+    # --- Build the appropriate plot ---
+    p <- switch(plot_type,
+                fit          = make_fit_plot(yr, target, d, apply_ylim),
+                forecast_1wk = make_forecast_plot(yr, target, 1, d, apply_ylim),
+                forecast_2wk = make_forecast_plot(yr, target, 2, d, apply_ylim),
+                fansight     = make_fansight_plot(yr, target, d, apply_ylim, plot_every_n = 4)
+    )
+    all_plots[[as.character(yr)]] <- p
+  }
+  
+  valid_plots <- Filter(Negate(is.null), all_plots)
+  if (!length(valid_plots)) { message("No plots for ", target, " ", plot_type); return(invisible(NULL)) }
+  
+  # ---- Shared legend (built from dummy data, not from real plots) ----
+  shared_legend <- extract_shared_legend(plot_type, target)
+  
+  # ---- Figure title ----
+  tgt_label <- c(total_abundance     = "Total Mosquito Abundance",
+                 infectious_per_1000 = "Infectious Mosquitoes per 1000",
+                 human_cases         = "Human WNV Cases")[target]
+  pt_label  <- c(fit          = "Model Fit",
+                 forecast_1wk = "1-Week-Ahead Forecast",
+                 forecast_2wk = "2-Week-Ahead Forecast",
+                 fansight     = "2-week ahead forecasts at each forecast origin")[plot_type]
+  
+  panel_grid <- gridExtra::arrangeGrob(
+    grobs = valid_plots,
+    ncol  = 5,
+    nrow  = 3,
+    top   = grid::textGrob(
+      label = paste0(tgt_label, "  —  ", pt_label, "  |  ", model_name),
+      gp    = grid::gpar(fontsize = 17, fontface = "bold")
+    )
+  )
+  
+  final_fig <- gridExtra::arrangeGrob(
+    panel_grid,
+    shared_legend,
+    ncol    = 1,
+    heights = grid::unit(c(20, 1.2), c("null", "cm"))
+  )
+  
+  fname <- file.path(save_dir,
+                     paste0("NEWpanel_", model_name, "_", target, "_", plot_type, ".pdf"))
+  ggsave(fname, plot = final_fig,
+         width = 32, height = 24, dpi = 300, bg = "white")
+  message("  Saved: ", fname)
+  invisible(final_fig)
+}
+
+# ============================================================
+# RUN ALL 12 COMBINATIONS  (3 targets x 4 plot types)
+# ============================================================
+
+targets    <- c("total_abundance", "infectious_per_1000", "human_cases")
+plot_types <- c("fit", "forecast_1wk", "forecast_2wk", "fansight")
+
+save_dir <- "./figures"          # <-- change to your preferred output folder
+dir.create(save_dir, showWarnings = FALSE, recursive = TRUE)
+
+for (tgt in targets) {
+  for (pt in plot_types) {
+    message("\n=== Building panel: ", tgt, "  |  ", pt, " ===")
+    tryCatch(
+      build_panel(target = tgt, plot_type = pt, save_dir = save_dir),
+      error = function(e) message("  ERROR: ", e$message)
+    )
+  }
+}
+
+message("\nAll 12 panels complete.")
+
+
+
+# ============================================================
+# SELECTED YEARS PANEL: 3 years x 3 targets x fit+forecast
+# Layout: 6 columns (fit/forecast alternating per year) x 3 rows (targets)
+# Columns: [2007-fit | 2007-forecast | 2014-fit | 2014-forecast | 2021-fit | 2021-forecast]
+# Rows:    [Total Abundance | Inf Mosq per 1000 | Human Cases]
+# ============================================================
+
+build_selected_years_panel <- function(
+    years_sel    = c(2007, 2014, 2021),
+    plot_every_n = 4,
+    save_dir     = ".",
+    filename     = "panel_selected_years_fansight.png"
+) {
+  
+  targets_sel <- c("total_abundance", "infectious_per_1000", "human_cases")
+  
+  # ---- Build all 18 plots: order is row-by-row ----
+  # gridExtra fills row 1 first, then row 2, then row 3.
+  # Row 1 = total_abundance across [yr1-fit, yr1-fan, yr2-fit, yr2-fan, yr3-fit, yr3-fan]
+  # Row 2 = infectious_per_1000, same column order
+  # Row 3 = human_cases, same column order
+  
+  all_plots <- vector("list", length(targets_sel) * length(years_sel) * 2)
+  plot_idx  <- 1
+  
+  for (tgt in targets_sel) {
+    for (yr in years_sel) {
+      
+      apply_ylim <- (yr != 2021)
+      
+      d <- tryCatch(
+        load_year_data(yr),
+        error = function(e) {
+          message("  Data load failed for ", yr, ": ", e$message); NULL
+        }
+      )
+      
+      # If data load fails, fill both slots with empty plots
+      if (is.null(d)) {
+        all_plots[[plot_idx]]     <- ggplot() + theme_void()
+        all_plots[[plot_idx + 1]] <- ggplot() + theme_void()
+        plot_idx <- plot_idx + 2
+        next
+      }
+      
+      # ---- FIT plot ----
+      p_fit <- make_fit_plot(yr, tgt, d, apply_ylim)
+      if (is.null(p_fit)) p_fit <- ggplot() + theme_void()
+      
+      # Column header: show year + "Fit" only on the top row (total_abundance)
+      if (tgt == "total_abundance") {
+        p_fit <- p_fit +
+          ggtitle(paste0(yr, "\nModel Fit")) +
+          theme(plot.title = element_text(face = "bold", size = 17,
+                                          hjust = 0.5))
+      } else {
+        p_fit <- p_fit + ggtitle(NULL)
+      }
+      
+      # ---- FAN CHART forecast plot ----
+      p_fan <- make_fansight_plot(yr, tgt, d, apply_ylim,
+                                  plot_every_n = plot_every_n)
+      if (is.null(p_fan)) p_fan <- ggplot() + theme_void()
+      
+      # Column header: show year + "Fan Chart" only on the top row
+      if (tgt == "total_abundance") {
+        p_fan <- p_fan +
+          ggtitle(paste0(yr, "\nForecast")) +
+          theme(plot.title = element_text(face = "bold", size = 17,
+                                          hjust = 0.5))
+      } else {
+        p_fan <- p_fan + ggtitle(NULL)
+      }
+      
+      all_plots[[plot_idx]]     <- p_fit
+      all_plots[[plot_idx + 1]] <- p_fan
+      plot_idx <- plot_idx + 2
+    }
+  }
+  
+  # ---- Shared legend covering both fit and fan elements ----
+  df_dummy <- data.frame(
+    Date     = seq(as.Date("2014-01-01"), by = "week", length.out = 10),
+    q05 = 1, q10 = 2, q25 = 3, q50 = 5, q75 = 7, q90 = 8, q95 = 9,
+    Observed = 5,
+    Fan_90_lo = 1, Fan_90_hi = 9,
+    Fan_80_lo = 2, Fan_80_hi = 8,
+    Fan_50_lo = 3, Fan_50_hi = 7,
+    Median = 5
+  )
+  
+  ref_p <- ggplot(df_dummy, aes(x = Date)) +
+    # Fit ribbons
+    geom_ribbon(aes(ymin = q05, ymax = q95, fill = "90% CI"),
+                alpha = 0.40) +
+    geom_ribbon(aes(ymin = q10, ymax = q90, fill = "80% CI"),
+                alpha = 0.50) +
+    geom_ribbon(aes(ymin = q25, ymax = q75, fill = "50% CI"),
+                alpha = 0.65) +
+    # Fan chart ribbons
+    geom_ribbon(aes(ymin = Fan_90_lo, ymax = Fan_90_hi, fill = "90% CI"),
+                alpha = 0.40) +
+    geom_ribbon(aes(ymin = Fan_80_lo, ymax = Fan_80_hi, fill = "80% CI"),
+                alpha = 0.55) +
+    geom_ribbon(aes(ymin = Fan_50_lo, ymax = Fan_50_hi, fill = "50% CI"),
+                alpha = 0.70) +
+    # Lines
+    geom_line(aes(y = q50,     color = "Median fit"),      linewidth = 0.7) +
+    geom_line(aes(y = Median,  color = "Median forecast"), linewidth = 0.6) +
+    #geom_line(aes(y = Observed,color = "Observed"),        linewidth = 0.7) +
+    geom_point(aes(y = Observed, color = "Observed"), size = 3) +
+    scale_fill_manual(
+      name   = NULL,
+      values = c(
+        "90% CI"  = "#BDD7EE",
+        "80% CI"  = "#5B9BD5",
+        "50% CI"  = "#1F4E79"
+      )
+    ) +
+    scale_color_manual(
+      name   = NULL,
+      values = c(
+        "Median fit"      = "#08306b",
+        "Median forecast" = "black",
+        "Observed"        = "red"
+      )
+    ) +
+    theme_minimal() +
+    theme(
+      legend.position  = "bottom",
+      legend.text      = element_text(size = 11),
+      legend.key.size  = unit(0.5, "cm"),
+      legend.box       = "horizontal"
+    )
+  
+  tmp        <- ggplot_gtable(ggplot_build(ref_p))
+  legend_idx <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  shared_legend <- tmp$grobs[[legend_idx]]
+  
+  # ---- Figure title ----
+  main_title <- grid::textGrob(
+    label = paste0(
+      "Model Fit and Forecasts for Selected Years  |  ",
+      model_name
+    ),
+    gp = grid::gpar(fontsize = 17, fontface = "bold")
+  )
+  
+  # ---- Arrange 6-col x 3-row grid ----
+  # Column order per row:
+  # [yr1-fit | yr1-fan | yr2-fit | yr2-fan | yr3-fit | yr3-fan]
+  panel_grid <- gridExtra::arrangeGrob(
+    grobs = all_plots,
+    ncol  = 6,
+    nrow  = 3,
+    top   = main_title
+  )
+  
+  # ---- Combine panel + legend ----
+  final_fig <- gridExtra::arrangeGrob(
+    panel_grid,
+    shared_legend,
+    ncol    = 1,
+    heights = grid::unit(c(20, 1.8), c("null", "cm"))
+  )
+  
+  # ---- Save ----
+  fname <- file.path(save_dir, filename)
+  ggsave(
+    fname,
+    plot   = final_fig,
+    width  = 32,   # wide: 6 columns
+    height = 16,   # tall: 3 rows + legend
+    dpi    = 300,
+    bg     = "white"
+  )
+  message("Saved: ", fname)
+  invisible(final_fig)
+}
+
+
+message("\n=== Building selected years panel (2007 | 2014 | 2021) ===")
+
+tryCatch(
+  build_selected_years_panel(
+    years_sel    = c(2007, 2014, 2021),
+    plot_every_n = 4,
+    save_dir     = save_dir,
+    filename     = paste0("panel_", model_name,
+                          "_selected_years_fit_and_forecast.pdf")
+  ),
+  error = function(e) message("  ERROR in selected years panel: ", e$message)
+)
+
+message("\nAll done.")
+
+# ============================================================
+# Schematic plot for presentation slide
+# Year: 2016 | Target: Total Abundance (or any target)
+# Shows:
+#   LEFT  of dashed line: full EnKF posterior fit (Jan–Jul)
+#   RIGHT of dashed line: fansight-style fan forecasts
+# Colours match the existing panel plots exactly
+# ============================================================
+
+library(tidyverse)
+library(dplyr)
+library(purrr)
+library(ggplot2)
+
+# ============================================================
+# CONFIGURATION — edit these to match your setup
+# ============================================================
+
+Year        <- 2016
+model_name  <- "FullModel"   # change to your model
+N_ens       <- 8000
+target      <- "total_abundance"       # "total_abundance" | "infectious_per_1000" | "human_cases"
+
+# Cutoff: fit shown up to this date; forecast fans shown after
+cutoff_date <- as.Date("2016-07-01")   # ~end of July
+
+# Forecast fans: show every Nth iteration after the cutoff
+plot_every_n <- 1    # smaller = more fans visible in the slide
+
+save_path <- "./schematic_2016_fansight.png"
+
+# ============================================================
+# EXACT SAME COLOURS as your panel plots
+# ============================================================
+
+# Fit ribbons
+col_fit_90 <- "#BDD7EE"
+col_fit_80 <- "#5B9BD5"
+col_fit_50 <- "#1F4E79"
+col_fit_median <- "#08306b"
+
+# Forecast fans (fansight style — same as make_fansight_plot)
+col_fan_90 <- "#BDD7EE"
+col_fan_80 <- "#5B9BD5"
+col_fan_50 <- "#1F4E79"
+col_fan_median <- "black"
+
+col_observed <- "red"
+
+alpha_90 <- 0.40
+alpha_80 <- 0.55
+alpha_50 <- 0.70
+
+# ============================================================
+# STEP 1: Load observation data for 2016
+# (mirrors load_year_data from plot_all_years_panels_v2.R)
+# ============================================================
+
+mosq_pools_agg  <- read.csv("./mosq_pools_data.csv")
+X_obs           <- as.numeric(
+  as.data.frame(mosq_pools_agg %>% filter(Year == 2016))$Tot_Mosq_Abund
+)
+mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+X2_obs          <- as.numeric(
+  as.data.frame(mosq_pools_data %>% filter(Year == 2016))$Inf_Mosq_Per_1000
+)
+WNV             <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+X3_obs_raw      <- WNV %>% filter(YEAR == 2016)
+X3_obs_raw      <- X3_obs_raw[-1, ]
+X0_obs          <- cumsum(as.numeric(X3_obs_raw$cases))
+
+# Pad / trim to 52 weeks
+pad52 <- function(x) {
+  if (length(x) < 52) x <- c(x, rep(0, 52 - length(x)))
+  x[1:52]
+}
+X_obs1 <- pad52(X_obs)
+X_obs2 <- pad52(X2_obs)
+X0_obs <- pad52(X0_obs)
+
+# Date vectors
+all_weeks            <- seq(as.Date("2016-01-01"), by = "weeks", length.out = 52)
+forecast_1week_dates <- all_weeks[6:51]
+forecast_2week_dates <- all_weeks[7:52]
+
+# Pick observation vector for target
+obs_vec <- switch(target,
+                  total_abundance     = X_obs1,
+                  infectious_per_1000 = X_obs2,
+                  human_cases         = X0_obs
+)
+
+# ============================================================
+# STEP 2: Load fit ensemble and extract posterior quantiles
+# Only keep weeks UP TO the cutoff date
+# ============================================================
+
+rds_fit <- paste0("save_ensemble_full_global_", model_name, "_", Year, ".rds")
+ens     <- readRDS(rds_fit)     # dim: [n_vars, N_ens, n_weeks]
+n_weeks <- dim(ens)[3]
+date_vec <- all_weeks[1:n_weeks]
+
+# Extract the fitted target
+pred_mat <- switch(target,
+                   total_abundance = {
+                     ens[1, 1:N_ens, ] + ens[2, 1:N_ens, ]
+                   },
+                   infectious_per_1000 = {
+                     sm  <- ens[1, 1:N_ens, ]
+                     im  <- ens[2, 1:N_ens, ]
+                     tot <- sm + im
+                     tot[tot == 0] <- NA
+                     im / tot * 1000
+                   },
+                   human_cases = ens[8, 1:N_ens, ]
+)
+
+qmat <- apply(pred_mat, 2, quantile,
+              probs = c(0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95),
+              na.rm = TRUE)
+
+df_fit <- data.frame(
+  Date = date_vec,
+  q05  = qmat[1, ], q10 = qmat[2, ], q25 = qmat[3, ],
+  q50  = qmat[4, ],
+  q75  = qmat[5, ], q90 = qmat[6, ], q95 = qmat[7, ]
+) %>%
+  filter(Date <= cutoff_date)   # <-- only show fit up to cutoff
+
+# Full observed line (Jan–Dec) so it runs across the whole plot
+df_obs_full <- data.frame(
+  Date     = all_weeks[1:length(obs_vec)],
+  Observed = obs_vec
+)
+
+# ============================================================
+# STEP 3: Load forecast results and build fansight fans
+# Only plot fans whose ORIGIN is after the cutoff
+# ============================================================
+
+rds_fc  <- paste0("results_", model_name, "_", Year, ".rds")
+results <- readRDS(rds_fc)
+
+q_levels <- c(0.01,0.025,0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,
+              0.45,0.5,0.55,0.6,0.65,0.7,0.75,0.8,0.85,0.9,
+              0.95,0.975,0.99)
+
+f1 <- forecast_1week_dates
+f2 <- forecast_2week_dates
+
+# All iterations
+n_iter    <- length(results)
+iter_all  <- 1:n_iter
+iter_plot <- seq(1, n_iter, by = plot_every_n)
+
+fan_rows <- list()
+for (i in iter_plot) {
+  origin_date <- f1[i] - 7   # assimilation date (one week before first forecast)
+  if (origin_date < cutoff_date) next   # skip fans before the cutoff
+  
+  for (h in c(1, 2)) {
+    qs <- results[[i]][[paste0(target, "_q_", h)]]
+    if (is.null(qs) || all(is.na(qs))) next
+    
+    get_q <- function(p) {
+      idx <- which(abs(q_levels - p) < 1e-9)
+      if (!length(idx)) NA else as.numeric(qs[idx])
+    }
+    
+    fan_rows[[length(fan_rows) + 1]] <- data.frame(
+      origin  = origin_date,
+      iter    = i,
+      horizon = h,
+      tdate   = if (h == 1) f1[i] else f2[i],
+      lo90 = get_q(0.05), hi90 = get_q(0.95),
+      lo80 = get_q(0.10), hi80 = get_q(0.90),
+      lo50 = get_q(0.25), hi50 = get_q(0.75),
+      med  = get_q(0.50)
+    )
+  }
+}
+
+fan_df <- bind_rows(fan_rows)
+
+# Widen to one row per origin — need both horizons
+fan_wide <- fan_df %>%
+  group_by(origin, iter) %>%
+  filter(n() == 2) %>%
+  summarise(
+    date_h1 = tdate[horizon == 1],  date_h2 = tdate[horizon == 2],
+    lo90_h1 = lo90[horizon==1], hi90_h1 = hi90[horizon==1],
+    lo90_h2 = lo90[horizon==2], hi90_h2 = hi90[horizon==2],
+    lo80_h1 = lo80[horizon==1], hi80_h1 = hi80[horizon==1],
+    lo80_h2 = lo80[horizon==2], hi80_h2 = hi80[horizon==2],
+    lo50_h1 = lo50[horizon==1], hi50_h1 = hi50[horizon==1],
+    lo50_h2 = lo50[horizon==2], hi50_h2 = hi50[horizon==2],
+    med_h1  = med[horizon==1],   med_h2  = med[horizon==2],
+    .groups = "drop"
+  ) %>%
+  filter(!is.na(date_h2))
+
+# Build long-format ribbons
+make_rib <- function(df, lo1, hi1, lo2, hi2, lv) {
+  bind_rows(
+    df %>% transmute(origin, iter, date = date_h1,
+                     ymin = !!sym(lo1), ymax = !!sym(hi1), level = lv),
+    df %>% transmute(origin, iter, date = date_h2,
+                     ymin = !!sym(lo2), ymax = !!sym(hi2), level = lv)
+  ) %>% arrange(origin, iter, date)
+}
+
+r90 <- make_rib(fan_wide, "lo90_h1","hi90_h1","lo90_h2","hi90_h2","90% PI")
+r80 <- make_rib(fan_wide, "lo80_h1","hi80_h1","lo80_h2","hi80_h2","80% PI")
+r50 <- make_rib(fan_wide, "lo50_h1","hi50_h1","lo50_h2","hi50_h2","50% PI")
+
+med_long <- bind_rows(
+  fan_wide %>% transmute(origin, iter, date = date_h1, med = med_h1),
+  fan_wide %>% transmute(origin, iter, date = date_h2, med = med_h2)
+) %>% arrange(origin, iter, date)
+
+# ============================================================
+# STEP 4: Build the plot
+# ============================================================
+
+ylab_map <- c(
+  total_abundance     = "Total Abundance",
+  infectious_per_1000 = "Inf. Mosq. per 1000",
+  human_cases         = "Human Cases"
+)
+
+p <- ggplot() +
+  
+  # ---- Full observed line (runs Jan–Dec in red) ----
+geom_point(data = df_obs_full,
+          aes(x = Date, y = Observed,colour = "Observed"),
+          size = 3) +
+  # ---- FIT ribbons (Jan to cutoff) ----
+geom_ribbon(data = df_fit,
+            aes(x = Date, ymin = q05, ymax = q95, fill = "90% CI"),
+            alpha = alpha_90) +
+  geom_ribbon(data = df_fit,
+              aes(x = Date, ymin = q10, ymax = q90, fill = "80% CI"),
+              alpha = alpha_80) +
+  geom_ribbon(data = df_fit,
+              aes(x = Date, ymin = q25, ymax = q75, fill = "50% CI"),
+              alpha = alpha_50) +
+  geom_line(data = df_fit,
+            aes(x = Date, y = q50, colour = "Median fit"),
+            linewidth = 0.8) +
+  
+  # ---- FANSIGHT forecast fans (after cutoff) ----
+geom_ribbon(data = r90,
+            aes(x = date, ymin = ymin, ymax = ymax,
+                group = interaction(origin, iter), fill = "90% PI"),
+            alpha = alpha_90) +
+  geom_ribbon(data = r80,
+              aes(x = date, ymin = ymin, ymax = ymax,
+                  group = interaction(origin, iter), fill = "80% PI"),
+              alpha = alpha_80) +
+  geom_ribbon(data = r50,
+              aes(x = date, ymin = ymin, ymax = ymax,
+                  group = interaction(origin, iter), fill = "50% PI"),
+              alpha = alpha_50) +
+  geom_line(data = med_long,
+            aes(x = date, y = med,
+                group = interaction(origin, iter),
+                colour = "Median forecast"),
+            linewidth = 0.5, alpha = 0.85) +
+  
+  # ---- Vertical dashed line at cutoff ----
+geom_vline(xintercept = as.numeric(cutoff_date),
+           linetype = "dashed", colour = "grey30",
+           linewidth = 0.9) +
+  
+  # ---- Annotation labels for left/right of the dashed line ----
+annotate("text",
+         x     = cutoff_date - 40,
+         y     = Inf,
+         label = "← Model fit",
+         hjust = 1, vjust = 1.5,
+         size  = 3.8, colour = "grey30", fontface = "italic") +
+  annotate("text",
+           x     = cutoff_date + 10,
+           y     = Inf,
+           label = "Forecasts →",
+           hjust = 0, vjust = 1.5,
+           size  = 3.8, colour = "grey30", fontface = "italic") +
+  
+  # ---- Scales ----
+scale_fill_manual(
+  name   = NULL,
+  values = c(
+    "90% CI" = col_fit_90,
+    "80% CI" = col_fit_80,
+    "50% CI" = col_fit_50,
+    "90% PI" = col_fan_90,
+    "80% PI" = col_fan_80,
+    "50% PI" = col_fan_50
+  ),
+  # Show only 3 entries in the legend (CI and PI share the same colours
+  # so only the fit labels are needed — PI entries are visually identical)
+  breaks = c("90% CI", "80% CI", "50% CI"),
+  labels = c("90% CI" = "90% CI",
+             "80% CI" = "80% CI",
+             "50% CI" = "50% CI")
+) +
+  scale_colour_manual(
+    name   = NULL,
+    values = c(
+      "Observed"        = col_observed,
+      "Median fit"      = col_fit_median,
+      "Median forecast" = col_fan_median
+    )
+  ) +
+  
+  # ---- Axis limits: same as your standard panels for 2016 ----
+scale_y_continuous(
+  limits = switch(target,
+                  total_abundance     = c(0, 2500),
+                  infectious_per_1000 = c(0, 40),
+                  human_cases         = c(0, 260)
+  )
+) +
+  scale_x_date(
+    date_breaks = "1 month",
+    date_labels = "%b"
+  ) +
+  
+  # ---- Labels ----
+labs(
+  x     = NULL,
+  y     = ylab_map[target],
+  title = paste0("2016  —  ", ylab_map[target],
+                 "  |  Fit (Jan–Jul) + Forecasts")
+) +
+  
+  # ---- Theme: identical to your other panels ----
+theme_minimal(base_size = 13) +
+  theme(
+    plot.title       = element_text(face = "bold", size = 13, hjust = 0.5),
+    axis.text.x      = element_text(angle = 45, hjust = 1, size = 11),
+    axis.text.y      = element_text(size = 11),
+    legend.position  = "bottom",
+    legend.text      = element_text(size = 11),
+    legend.key.size  = unit(0.5, "cm"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(colour = "grey92")
+  ) +
+  guides(
+    fill   = guide_legend(order = 1, nrow = 1),
+    colour = guide_legend(order = 2, nrow = 1)
+  )
+# ============================================================
+# STEP 5: Save
+# ============================================================
+
+ggsave(
+  filename = save_path,
+  plot     = p,
+  width    = 9,
+  height   = 5,
+  dpi      = 300,
+  bg       = "white"
+)
+
+message("Saved: ", save_path)
+# ============================================================
+# 2014 Three-panel layout function
+# Produces TWO separate outputs:
+#
+#   Output 1: 1 row x 3 col  — Model Fit (all three targets)
+#
+#   Output 2: 2 rows x 3 col — Row 1: FluSight Fan Chart
+#                              Row 2: 2-Week-Ahead Forecast
+#                              (all three targets)
+#
+# Colours & style match plot_all_years_panels_v2.R exactly
+# ============================================================
+
+library(tidyverse)
+library(dplyr)
+library(purrr)
+library(ggplot2)
+library(gridExtra)
+library(grid)
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+Year        <- 2014
+model_name  <- "FullModel"   # change to your model name
+N_ens       <- 8000
+num_iterations <- 46
+plot_every_n   <- 4     # for fansight: plot every Nth fan
+
+# Y-axis limits (same as your standard panels)
+y_limits <- list(
+  total_abundance     = c(0, 6500),
+  infectious_per_1000 = c(0, 40),
+  human_cases         = c(0, 260)
+)
+
+# Colour palettes — EXACT match to your existing panels
+# Fit ribbons
+col_fit_90     <- "#BDD7EE"
+col_fit_80     <- "#5B9BD5"
+col_fit_50     <- "#1F4E79"
+col_fit_median <- "#08306b"
+col_observed_fit <- "red"
+
+# Fansight fans
+col_fan_90     <- "#BDD7EE"
+col_fan_80     <- "#5B9BD5"
+col_fan_50     <- "#1F4E79"
+col_fan_median <- "black"
+col_observed_fan <- "#c00000"
+
+# 2-week forecast (linerange style from your original code)
+col_fc_90   <- "#636363"
+col_fc_80   <- "#252525"
+col_fc_50   <- "black"
+col_fc_pt   <- "black"
+col_fc_obs  <- "red"
+
+# ============================================================
+# STEP 1: Load observation data for 2014
+# Mirrors load_year_data() from plot_all_years_panels_v2.R
+# ============================================================
+
+mosq_pools_agg  <- read.csv("./mosq_pools_data.csv")
+X_obs_raw       <- as.numeric(
+  as.data.frame(mosq_pools_agg %>% filter(Year == 2014))$Tot_Mosq_Abund
+)
+mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+X2_obs_raw      <- as.numeric(
+  as.data.frame(mosq_pools_data %>% filter(Year == 2014))$Inf_Mosq_Per_1000
+)
+WNV             <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+X3_obs_raw      <- WNV %>% filter(YEAR == 2014)
+X3_obs_raw      <- X3_obs_raw[-1, ]
+X3_obs_raw      <- cumsum(as.numeric(X3_obs_raw$cases))
+
+# Pad / trim to 52 weeks (same as load_year_data padding logic)
+pad52 <- function(x) {
+  if (length(x) < 52) x <- c(x, rep(0, 52 - length(x)))
+  x[1:52]
+}
+X_obs1 <- pad52(c(X_obs_raw,  0))   # 2014 gets +1 zero (matches your code)
+X_obs2 <- pad52(c(X2_obs_raw, 0))
+X0_obs <- pad52(X3_obs_raw)
+
+# Date vectors (identical to your original code)
+training_start_date  <- as.Date("2014-01-01")
+all_weeks            <- seq(training_start_date, by = "weeks", length.out = 52)
+forecast_1week_dates <- all_weeks[6:51]
+forecast_2week_dates <- all_weeks[7:52]
+
+# ============================================================
+# STEP 2: Load RDS files
+# ============================================================
+
+rds_fit <- paste0("save_ensemble_full_global_", model_name, "_", Year, ".rds")
+rds_fc  <- paste0("results_",                  model_name, "_", Year, ".rds")
+
+ens     <- readRDS(rds_fit)    # dim: [n_vars, N_ens, n_weeks]
+results <- readRDS(rds_fc)     # list of length num_iterations
+
+n_weeks_fit <- dim(ens)[3]
+date_fit     <- all_weeks[1:n_weeks_fit]
+
+# ============================================================
+# HELPER: extract fit quantiles for one target
+# ============================================================
+
+extract_fit <- function(target) {
+  pred_mat <- switch(target,
+                     total_abundance = {
+                       ens[1, 1:N_ens, ] + ens[2, 1:N_ens, ]
+                     },
+                     infectious_per_1000 = {
+                       sm  <- ens[1, 1:N_ens, ]
+                       im  <- ens[2, 1:N_ens, ]
+                       tot <- sm + im; tot[tot == 0] <- NA
+                       im / tot * 1000
+                     },
+                     human_cases = ens[8, 1:N_ens, ]
+  )
+  qmat <- apply(pred_mat, 2, quantile,
+                probs = c(0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95),
+                na.rm = TRUE)
+  data.frame(
+    Date = date_fit,
+    q05  = qmat[1,], q10 = qmat[2,], q25 = qmat[3,],
+    q50  = qmat[4,],
+    q75  = qmat[5,], q90 = qmat[6,], q95 = qmat[7,]
+  )
+}
+
+# ============================================================
+# HELPER: y-axis label
+# ============================================================
+
+ylab_map <- c(
+  total_abundance     = "Total Abundance",
+  infectious_per_1000 = "Inf. Mosq. per 1000",
+  human_cases         = "Human Cases"
+)
+
+# ============================================================
+# SECTION A: MODEL FIT PLOTS  (1 row x 3 col)
+# ============================================================
+
+make_fit_2014 <- function(target) {
+  
+  df_fit <- extract_fit(target)
+  obs_vec <- switch(target,
+                    total_abundance     = X_obs1[1:50],
+                    infectious_per_1000 = X_obs2[1:50],
+                    human_cases         = X0_obs[1:50]
+  )
+  df_obs <- data.frame(
+    Date     = all_weeks[1:length(obs_vec)],
+    Observed = obs_vec
+  )
+  
+  ggplot(df_fit, aes(x = Date)) +
+    geom_ribbon(aes(ymin = q05, ymax = q95, fill = "90% CI"), alpha = 0.40) +
+    geom_ribbon(aes(ymin = q10, ymax = q90, fill = "80% CI"), alpha = 0.50) +
+    geom_ribbon(aes(ymin = q25, ymax = q75, fill = "50% CI"), alpha = 0.65) +
+    geom_line(aes(y = q50, colour = "Median fit"),  linewidth = 0.8) +
+    geom_point(data = df_obs,
+              aes(x = Date, y = Observed, colour = "Observed"),
+              size=3) +
+    scale_fill_manual(
+      name   = NULL,
+      values = c("90% CI" = col_fit_90,
+                 "80% CI" = col_fit_80,
+                 "50% CI" = col_fit_50)
+    ) +
+    scale_colour_manual(
+      name   = NULL,
+      values = c("Median fit" = col_fit_median,
+                 "Observed"   = col_observed_fit)
+    ) +
+    #scale_y_continuous(limits = y_limits[[target]]) +
+    scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+    labs(x = NULL, y = ylab_map[target]) +
+    theme_minimal(base_size = 19) +
+    theme(
+      axis.text.x      = element_text(angle = 45, hjust = 1, size = 19, face   = "bold"),
+      axis.text.y      = element_text(size = 19, face   = "bold"),
+      axis.title.y     = element_text(size = 19, face   = "bold"),
+      legend.position  = "bottom",
+      legend.text      = element_text(size = 19, face   = "bold"),
+      legend.key.size  = unit(0.4, "cm"),
+      panel.grid.minor = element_blank()
+    )
+}
+
+# ============================================================
+# SECTION B: FANSIGHT PLOTS  (row 1 of the combined figure)
+# Same logic as make_fansight_plot in plot_all_years_panels_v2.R
+# ============================================================
+
+make_fansight_2014 <- function(target) {
+  
+  q_levels <- c(0.01,0.025,0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,
+                0.45,0.5,0.55,0.6,0.65,0.7,0.75,0.8,0.85,0.9,
+                0.95,0.975,0.99)
+  
+  f1 <- forecast_1week_dates
+  f2 <- forecast_2week_dates
+  iter_plot <- seq(1, num_iterations, by = plot_every_n)
+  
+  fan_rows <- list()
+  for (i in iter_plot) {
+    for (h in c(1, 2)) {
+      qs <- results[[i]][[paste0(target, "_q_", h)]]
+      if (is.null(qs) || all(is.na(qs))) next
+      get_q <- function(p) {
+        idx <- which(abs(q_levels - p) < 1e-9)
+        if (!length(idx)) NA else as.numeric(qs[idx])
+      }
+      fan_rows[[length(fan_rows) + 1]] <- data.frame(
+        origin  = f1[i] - 7,
+        iter    = i,
+        horizon = h,
+        tdate   = if (h == 1) f1[i] else f2[i],
+        lo90 = get_q(0.05), hi90 = get_q(0.95),
+        lo80 = get_q(0.10), hi80 = get_q(0.90),
+        lo50 = get_q(0.25), hi50 = get_q(0.75),
+        med  = get_q(0.50)
+      )
+    }
+  }
+  if (!length(fan_rows)) return(ggplot() + theme_void())
+  fan_df <- bind_rows(fan_rows)
+  
+  fan_wide <- fan_df %>%
+    group_by(origin, iter) %>%
+    filter(n() == 2) %>%
+    summarise(
+      date_h1 = tdate[horizon==1], date_h2 = tdate[horizon==2],
+      lo90_h1=lo90[horizon==1], hi90_h1=hi90[horizon==1],
+      lo90_h2=lo90[horizon==2], hi90_h2=hi90[horizon==2],
+      lo80_h1=lo80[horizon==1], hi80_h1=hi80[horizon==1],
+      lo80_h2=lo80[horizon==2], hi80_h2=hi80[horizon==2],
+      lo50_h1=lo50[horizon==1], hi50_h1=hi50[horizon==1],
+      lo50_h2=lo50[horizon==2], hi50_h2=hi50[horizon==2],
+      med_h1 =med[horizon==1],  med_h2 =med[horizon==2],
+      .groups = "drop"
+    ) %>% filter(!is.na(date_h2))
+  
+  make_rib <- function(df, lo1, hi1, lo2, hi2, lv)
+    bind_rows(
+      df %>% transmute(origin, iter, date = date_h1,
+                       ymin = !!sym(lo1), ymax = !!sym(hi1), level = lv),
+      df %>% transmute(origin, iter, date = date_h2,
+                       ymin = !!sym(lo2), ymax = !!sym(hi2), level = lv)
+    ) %>% arrange(origin, iter, date)
+  
+  r90 <- make_rib(fan_wide,"lo90_h1","hi90_h1","lo90_h2","hi90_h2","90% CI")
+  r80 <- make_rib(fan_wide,"lo80_h1","hi80_h1","lo80_h2","hi80_h2","80% CI")
+  r50 <- make_rib(fan_wide,"lo50_h1","hi50_h1","lo50_h2","hi50_h2","50% CI")
+  med_long <- bind_rows(
+    fan_wide %>% transmute(origin, iter, date = date_h1, med = med_h1),
+    fan_wide %>% transmute(origin, iter, date = date_h2, med = med_h2)
+  ) %>% arrange(origin, iter, date)
+  
+  obs_vec <- switch(target,
+                    total_abundance     = X_obs1,
+                    infectious_per_1000 = X_obs2,
+                    human_cases         = X0_obs
+  )
+  obs_df <- data.frame(date   = all_weeks[1:length(obs_vec)],
+                       actual = obs_vec)
+  
+  ggplot() +
+    geom_line(data = obs_df,
+              aes(x = date, y = actual, colour = "Observed"),
+              linewidth = 0.8) +
+    geom_point(data = obs_df,
+               aes(x = date, y = actual, colour = "Observed"),
+               size=3) +
+    geom_ribbon(data = r90,
+                aes(x = date, ymin = ymin, ymax = ymax,
+                    group = interaction(origin, iter), fill = "90% CI"),
+                alpha = 0.40) +
+    geom_ribbon(data = r80,
+                aes(x = date, ymin = ymin, ymax = ymax,
+                    group = interaction(origin, iter), fill = "80% CI"),
+                alpha = 0.55) +
+    geom_ribbon(data = r50,
+                aes(x = date, ymin = ymin, ymax = ymax,
+                    group = interaction(origin, iter), fill = "50% CI"),
+                alpha = 0.70) +
+    geom_line(data = med_long,
+              aes(x = date, y = med,
+                  group = interaction(origin, iter),
+                  colour = "Median forecast"),
+              linewidth = 0.5, alpha = 0.85) +
+    geom_point(data = med_long,
+               aes(x = date, y = med, group = interaction(origin, iter), colour = "Median forecast"),
+               size=3) +
+    scale_fill_manual(
+      name   = "1- and 2-week-ahead forecast",
+      values = c("90% CI" = col_fan_90,
+                 "80% CI" = col_fan_80,
+                 "50% CI" = col_fan_50)
+    ) +
+    scale_colour_manual(
+      name   = NULL,
+      values = c("Observed"        = col_observed_fan,
+                 "Median forecast" = col_fan_median)
+    ) +
+    #scale_y_continuous(limits = y_limits[[target]]) +
+    scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+    labs(x = NULL, y = NULL) +
+    theme_minimal(base_size = 19) +
+    theme(
+      axis.text.x      = element_text(angle = 45, hjust = 1, size = 19, face   = "bold"),
+      axis.text.y      = element_text(size = 19, face   = "bold"),
+      axis.title.y     = element_text(size = 19, face   = "bold"),
+      legend.position  = "bottom",
+      legend.text      = element_text(size = 19, face   = "bold"),
+      legend.key.size  = unit(0.4, "cm"),
+      panel.grid.minor = element_blank()
+    )
+}
+
+# ============================================================
+# SECTION C: 2-WEEK-AHEAD FORECAST PLOTS  (row 2 of combined)
+# Style matches your original Q2/Q4/Q6 linerange plots exactly
+# ============================================================
+
+make_forecast2wk_2014 <- function(target) {
+  
+  q_key   <- paste0(target, "_q_2")
+  obs_idx <- 7:52    # 2-week ahead obs indices
+  
+  obs_vec <- switch(target,
+                    total_abundance     = X_obs1,
+                    infectious_per_1000 = X_obs2,
+                    human_cases         = X0_obs
+  )
+  
+  plot_df <- map_dfr(1:num_iterations, function(i) {
+    qs <- results[[i]][[q_key]]
+    if (is.null(qs)) return(NULL)
+    data.frame(
+      Iteration = i,
+      Date      = forecast_2week_dates[i],
+      Lower_50  = qs[["25%"]],  Upper_50 = qs[["75%"]],
+      Lower_90  = qs[["5%"]],   Upper_90 = qs[["95%"]],
+      Lower_80  = qs[["10%"]],  Upper_80 = qs[["90%"]],
+      Median    = qs[["50%"]]
+    )
+  })
+  
+  df_obs <- data.frame(
+    Date   = forecast_2week_dates,
+    X_real = obs_vec[obs_idx]
+  )
+  
+  ggplot() +
+    # 50% CI — thickest, most transparent (matches your Q2/Q4/Q6 style)
+    geom_linerange(data = plot_df,
+                   aes(x = as.Date(Date), ymin = Lower_50, ymax = Upper_50,
+                       colour = "50% CI"),
+                   linewidth = 4, alpha = 0.30) +
+    # 90% CI
+    geom_linerange(data = plot_df,
+                   aes(x = as.Date(Date), ymin = Lower_90, ymax = Upper_90,
+                       colour = "90% CI"),
+                   linewidth = 3, alpha = 0.50) +
+    # 80% CI
+    geom_linerange(data = plot_df,
+                   aes(x = as.Date(Date), ymin = Lower_80, ymax = Upper_80,
+                       colour = "80% CI"),
+                   linewidth = 2, alpha = 0.70) +
+    # Median forecast point
+    geom_point(data = plot_df,
+               aes(x = as.Date(Date), y = Median, colour = "Forecast"),
+               size = 3) +
+    # Observed line
+    geom_line(data = df_obs,
+              aes(x = as.Date(Date), y = X_real, colour = "Observed"),
+              linewidth = 1.2) +
+    scale_colour_manual(
+      name   = "2-week-ahead forecast",
+      values = c("90% CI"   = col_fc_90,
+                 "80% CI"   = col_fc_80,
+                 "50% CI"   = col_fc_50,
+                 "Forecast" = col_fc_pt,
+                 "Observed" = col_fc_obs),
+      breaks = c("90% CI", "80% CI", "50% CI", "Forecast", "Observed")
+    ) +
+    #scale_y_continuous(limits = y_limits[[target]]) +
+    scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+    labs(x = NULL, y = NULL) +
+    theme_minimal(base_size = 19) +
+    theme(
+      axis.text.x      = element_text(angle = 45, hjust = 1, size = 19, face   = "bold"),
+      axis.text.y      = element_text(size = 19, face   = "bold"),
+      axis.title.y     = element_text(size = 19, face   = "bold"),
+      legend.position  = "bottom",
+      legend.text      = element_text(size = 19, face   = "bold"),
+      legend.key.size  = unit(0.4, "cm"),
+      panel.grid.minor = element_blank()
+    )
+}
+
+# ============================================================
+# SECTION D: LEGEND BUILDER
+# Builds a standalone legend grob from a reference plot
+# ============================================================
+
+build_legend_grob <- function(plot_type) {
+  df_dummy <- data.frame(
+    Date     = seq(as.Date("2014-01-01"), by = "week", length.out = 10),
+    q05 = 1, q10 = 2, q25 = 3, q50 = 5, q75 = 7, q90 = 8, q95 = 9,
+    Observed = 5,
+    Lower_90 = 1, Upper_90 = 9,
+    Lower_80 = 2, Upper_80 = 8,
+    Lower_50 = 3, Upper_50 = 7,
+    Median   = 5
+  )
+  
+  if (plot_type == "fit") {
+    ref_p <- ggplot(df_dummy, aes(x = Date)) +
+      geom_ribbon(aes(ymin=q05,ymax=q95,fill="90% CI"),alpha=0.40) +
+      geom_ribbon(aes(ymin=q10,ymax=q90,fill="80% CI"),alpha=0.50) +
+      geom_ribbon(aes(ymin=q25,ymax=q75,fill="50% CI"),alpha=0.65) +
+      geom_line(aes(y=q50,   colour="Median fit"), linewidth=0.8) +
+      geom_line(aes(y=Observed,colour="Observed"), linewidth=0.8,
+                linetype="dashed") +
+      scale_fill_manual(name=NULL,
+                        values=c("90% CI"=col_fit_90,"80% CI"=col_fit_80,"50% CI"=col_fit_50)) +
+      scale_colour_manual(name=NULL,
+                          values=c("Median fit"=col_fit_median,"Observed"=col_observed_fit)) +
+      theme_minimal() +
+      theme(legend.position="bottom", legend.text=element_text(size=19, face   = "bold"),
+            legend.key.size=unit(0.5,"cm"))
+    
+  } else if (plot_type == "fansight") {
+    ref_p <- ggplot(df_dummy, aes(x = Date)) +
+      geom_ribbon(aes(ymin=Lower_90,ymax=Upper_90,fill="90% CI"),alpha=0.40) +
+      geom_ribbon(aes(ymin=Lower_80,ymax=Upper_80,fill="80% CI"),alpha=0.55) +
+      geom_ribbon(aes(ymin=Lower_50,ymax=Upper_50,fill="50% CI"),alpha=0.70) +
+      geom_line(aes(y=Observed,colour="Observed"),         linewidth=0.8) +
+      geom_line(aes(y=Median,  colour="Median forecast"),  linewidth=0.8) +
+      scale_fill_manual(name=NULL,
+                        values=c("90% CI"=col_fan_90,"80% CI"=col_fan_80,"50% CI"=col_fan_50)) +
+      scale_colour_manual(name="1- and 2-week-ahead forecast",
+                          values=c("Observed"=col_observed_fan,"Median forecast"=col_fan_median)) +
+      theme_minimal() +
+      theme(legend.position="bottom", legend.text=element_text(size=19, face   = "bold"),
+            legend.title     = element_text(size = 19),
+            legend.key.size=unit(0.7,"cm"))
+    
+  } else {  # forecast 2wk
+    ref_p <- ggplot(df_dummy, aes(x = Date)) +
+      geom_linerange(aes(ymin=Lower_90,ymax=Upper_90,colour="90% CI"),
+                     linewidth=3) +
+      geom_linerange(aes(ymin=Lower_80,ymax=Upper_80,colour="80% CI"),
+                     linewidth=2) +
+      geom_linerange(aes(ymin=Lower_50,ymax=Upper_50,colour="50% CI"),
+                     linewidth=4) +
+      geom_point(aes(y=Median,   colour="Forecast"), size=3) +
+      geom_line(aes(y=Observed,  colour="Observed"), linewidth=1.2) +
+      scale_colour_manual(name="2-week-ahead forecast",
+                          values=c("90% CI"=col_fc_90,"80% CI"=col_fc_80,"50% CI"=col_fc_50,
+                                   "Forecast"=col_fc_pt,"Observed"=col_fc_obs),
+                          breaks=c("90% CI","80% CI","50% CI","Forecast","Observed")) +
+      theme_minimal() +
+      theme(legend.position="bottom", legend.text=element_text(size=19, face   = "bold"),
+            legend.title     = element_text(size = 19),
+            legend.key.size=unit(0.7,"cm"))
+  }
+  
+  tmp <- ggplot_gtable(ggplot_build(ref_p))
+  idx <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  tmp$grobs[[idx]]
+}
+
+# ============================================================
+# STEP 3: BUILD ALL PLOTS
+# ============================================================
+
+targets <- c("human_cases", "infectious_per_1000","total_abundance")
+
+# --- Row: Fit ---
+fit_plots <- lapply(targets, make_fit_2014)
+
+# --- Row 1 of combined: Fansight ---
+fan_plots <- lapply(targets, make_fansight_2014)
+
+# --- Row 2 of combined: 2-week-ahead ---
+fc2_plots <- lapply(targets, make_forecast2wk_2014)
+
+# ============================================================
+# STEP 4: OUTPUT 1 — Fit only (1 row x 3 col)
+# ============================================================
+
+leg_fit <- build_legend_grob("fit")
+
+title_fit <- textGrob(
+  label = paste0("Human WNV Cases  |  Model Fit  |  ", model_name, "  |  2014"),
+  gp    = gpar(fontsize = 13, fontface = "bold")
+)
+
+# Remove per-plot legend (already have shared one)
+fit_plots_noleg <- lapply(fit_plots, function(p)
+  p + theme(legend.position = "none")
+)
+
+grid_fit <- arrangeGrob(
+  grobs  = fit_plots_noleg,
+  ncol   = 3,
+  nrow   = 1#,
+  #top    = title_fit
+)
+
+final_fit <- arrangeGrob(
+  grid_fit,
+  leg_fit,
+  ncol    = 1,
+  heights = unit(c(14, 1.5), c("cm", "cm"))
+)
+
+ggsave(
+  filename = paste0("plot_2014_fit_3panel_", model_name, ".png"),
+  plot     = final_fit,
+  width    = 15,
+  height   = 6,
+  dpi      = 300,
+  bg       = "white"
+)
+message("Saved: plot_2014_fit_3panel_", model_name, ".png")
+
+# ============================================================
+# STEP 5: OUTPUT 2 — Fansight + 2-wk forecast (2 rows x 3 col)
+# Row 1: Fansight fan chart
+# Row 2: 2-week-ahead linerange forecast
+# ============================================================
+
+# Row labels as text grobs on the left
+row_label_fan <- textGrob(
+  "Fan Chart\n(FluSight)", rot = 90,
+  gp = gpar(fontsize = 19, fontface = "bold")
+)
+row_label_fc2 <- textGrob(
+  "2-Week\nForecast", rot = 90,
+  gp = gpar(fontsize = 19, fontface = "bold")
+)
+
+# Shared legends per row (different colour schemes)
+leg_fan <- build_legend_grob("fansight")
+leg_fc2 <- build_legend_grob("forecast2wk")
+
+# Remove per-plot legends
+fan_plots_noleg <- lapply(fan_plots, function(p)
+  p + theme(legend.position = "none")
+)
+fc2_plots_noleg <- lapply(fc2_plots, function(p)
+  p + theme(legend.position = "none")
+)
+
+# Column headers (target names) — added as titles to first-row plots only
+col_headers <- c("Human Cases", "Inf. Mosq. per 1000", "Total Abundance")
+fan_plots_titled <- mapply(function(p, hdr) {
+  p + labs(title = hdr) +
+    theme(plot.title = element_text(face = "bold", size = 19, hjust = 0.5))
+}, fan_plots_noleg, col_headers, SIMPLIFY = FALSE)
+
+fc2_plots_titled <- lapply(fc2_plots_noleg, function(p)
+  p + labs(title = NULL)
+)
+
+# Combine 6 plots into 2x3 grid
+grid_combined <- arrangeGrob(
+  # Row 1 — fansight
+  fan_plots_titled[[1]], fan_plots_titled[[2]], fan_plots_titled[[3]],
+  # Row 2 — 2-week forecast
+  fc2_plots_titled[[1]], fc2_plots_titled[[2]], fc2_plots_titled[[3]],
+  ncol = 3,
+  nrow = 2#,
+  # top  = textGrob(
+  #   label = paste0(model_name, "  |  2014  |  ",
+  #                  "Row 1: FluSight Fan Chart    Row 2: 2-Week-Ahead Forecast"),
+  #   gp    = gpar(fontsize = 12, fontface = "bold")
+  # )
+)
+
+# Stack grid + two legend rows
+final_combined <- arrangeGrob(
+  grid_combined,
+  arrangeGrob(leg_fan, leg_fc2, ncol = 2),   # two legends side by side
+  ncol    = 1,
+  heights = unit(c(20, 2.8), c("cm", "cm"))
+)
+
+ggsave(
+  filename = paste0("plot_2014_fansight_fc2wk_2x3_", model_name, ".png"),
+  plot     = final_combined,
+  width    = 25,
+  height   = 10,
+  dpi      = 300,
+  bg       = "white"
+)
+message("Saved: plot_2014_fansight_fc2wk_2x3_", model_name, ".png")
+message("All 2014 plots complete.")
