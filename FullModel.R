@@ -10,6 +10,551 @@ library(gridExtra)
 library(dplyr)
 library(MASS)
 library(purrr)
+library(epipredict)
+library(epiprocess)
+library(distributional)
+years_to_run <- c(2006:2019, 2021)
+#years_to_run <- c(2006:2019)
+#years_to_run <- c(2021)
+for (Year in years_to_run) {
+  
+  cat("\n", paste(rep("=", 60), collapse=""), "\n")
+  cat("RUNNING YEAR:", Year, "\n")
+  cat(paste(rep("=", 60), collapse=""), "\n\n")
+  # ==================================================================== 
+  # YEAR-SPECIFIC DATA LOADING
+  # ==================================================================== 
+  if (Year == 2021) {
+    cat("Loading 2021 data...\n")
+    
+    # Climate data for 2021
+    T_temp <- read.csv("./county_temp_2020-2024.csv")
+    column_name <- "rowMeans.combined_temp..na.rm...TRUE."
+    inputTem_i <- as.numeric(T_temp[[column_name]])
+    inputTem_i <- inputTem_i[367:731]  # 2021 subset (365 days)
+    
+    P_temp <- read.csv("./county_prcp_2021-2024.csv")
+    column_name <- "rowMeans.combined_p..na.rm...TRUE."
+    inputP_i <- as.numeric(P_temp[[column_name]])
+    inputP_i <- inputP_i[1:365]
+    
+    # Observation data for 2021
+    mosq_pools_agg <- read.csv("./mosq_pools_agg_2021.csv")
+    X_obs <- as.numeric(mosq_pools_agg$Tot_Mosq_Abund)
+    
+    mosq_pools_data <- read.csv("./mosq_pools_data_2021.csv")
+    X2_obs <- as.numeric(mosq_pools_data$Inf_Mosq_Per_1000)
+    
+    WNV_humans_summary3 <- read.csv("./WNV_humans_summary3.csv")
+    X3_obs <- WNV_humans_summary3 %>% filter(YEAR == 2021)
+    X3_obs <- X3_obs[-1,]
+    X3_obs <- as.numeric(X3_obs$cases)
+    X3_obs <- cumsum(X3_obs)
+    
+    # Universal dates for 2021
+    training_start_date <- as.Date("2021-01-01")
+    fitting_start_date <- as.Date("2021-02-01")
+    date_gam <- seq(as.Date("2021-01-01"), as.Date("2021-12-28"), by = "week")
+    all_weeks <- seq(training_start_date, by = "weeks", length.out = 52)
+    
+  } else if (Year == 2020) {
+    cat("Loading 2020 data...\n")
+    
+    T_temp <- read.csv("./county_temp_2020-2024.csv")
+    column_name <- "rowMeans.combined_temp..na.rm...TRUE."
+    inputTem_i <- as.numeric(T_temp[[column_name]])
+    inputTem_i <- inputTem_i[1:366]  # 2020 subset (365 days)
+    P_temp <-read.csv("/Users/ko577/county_prcp_2020.csv")
+    column_name <- "rowMeans.combined_p..na.rm...TRUE."
+    inputTem_i <- as.numeric(T_temp[[column_name]])
+    mosq_pools_agg <- read.csv("./mosq_pools_agg_2020.csv")
+    X_obs <- as.numeric(mosq_pools_agg$Tot_Mosq_Abund)
+    
+    mosq_pools_data <- read.csv("./mosq_pools_data_2020.csv")
+    X2_obs <- as.numeric(mosq_pools_data$Inf_Mosq_Per_1000)
+    
+    WNV_humans_summary3 <- read.csv("./WNV_humans_summary3.csv")
+    X3_obs <- WNV_humans_summary3 %>% filter(YEAR == 2020)
+    X3_obs <- X3_obs[-1,]
+    X3_obs <- as.numeric(X3_obs$cases)
+    X3_obs <- cumsum(X3_obs)
+    
+    # Universal dates for 2020
+    training_start_date <- as.Date("2020-01-01")
+    fitting_start_date <- as.Date("2020-02-01")
+    date_gam <- seq(as.Date("2020-01-01"), as.Date("2020-12-28"), by = "week")
+    all_weeks <- seq(training_start_date, by = "weeks", length.out = 52)
+    
+    
+  }else if (Year == 2019) {
+    cat("Loading 2019 data...\n")
+    
+    T_temp <-read.csv("/Users/ko577/Downloads/county_temp_2018-2019.csv")
+    column_name <- "rowMeans.combined_temp..na.rm...TRUE."
+    inputTem_i <- as.numeric(T_temp[[column_name]])
+    inputTem_i <- inputTem_i[366:730]
+    P_temp <-read.csv("/Users/ko577/Downloads/county_prcp_2018-2019.csv")
+    column_name <- "rowMeans.combined_p..na.rm...TRUE."
+    inputP_i <- as.numeric(P_temp[[column_name]])
+    inputP_i <- inputP_i[366:730]
+    
+    
+    mosq_pools_agg <- read.csv("./mosq_pools_data_2019.csv")
+    X_obs <- as.numeric(c(mosq_pools_agg$Tot_Mosq_Abund)) 
+    X_obs <- as.numeric(c(0, X_obs, 0))
+    mosq_pools_data <- read.csv("./mosq_pools_data_2019.csv")
+    X2_obs <- as.numeric(c(mosq_pools_data$Inf_Mosq_Per_1000))  
+    X2_obs <- as.numeric(c(0, X2_obs, 0))
+    
+    WNV_humans_summary3 <- read.csv("./WNV_humans_summary3_2018-2019.csv")
+    X3_obs <- WNV_humans_summary3 %>% filter(YEAR == 2019)
+    X3_obs <- X3_obs[-1,]
+    X3_obs <- as.numeric(X3_obs$cases)
+    X3_obs[which(X3_obs == 1)[1]] <- 0
+    X3_obs <- cumsum(X3_obs)
+    
+    # Universal dates for 2019
+    training_start_date <- as.Date("2019-01-01")
+    fitting_start_date <- as.Date("2019-02-01")
+    date_gam <- seq(as.Date("2019-01-01"), as.Date("2019-12-28"), by = "week")
+    all_weeks <- seq(training_start_date, by = "weeks", length.out = 52)
+    
+  }else if (Year == 2018) {
+    cat("Loading 2018 data...\n")
+    
+    T_temp <-read.csv("/Users/ko577/Downloads/county_temp_2018-2019.csv")
+    column_name <- "rowMeans.combined_temp..na.rm...TRUE."
+    inputTem_i <- as.numeric(T_temp[[column_name]])
+    inputTem_i <- inputTem_i[1:365]
+    
+    P_temp <-read.csv("/Users/ko577/Downloads/county_prcp_2018-2019.csv")
+    column_name <- "rowMeans.combined_p..na.rm...TRUE."
+    inputP_i <- as.numeric(P_temp[[column_name]])
+    inputP_i <- inputP_i[1:365]
+    
+    mosq_pools_agg <- read.csv("./mosq_pools_data_2018-2019.csv")
+    X_obs <- as.data.frame(mosq_pools_agg %>% filter(Year == 2018))
+    X_obs <- as.numeric(c(X_obs$Tot_Mosq_Abund)) 
+    mosq_pools_agg0 <- read.csv("./temp_csv_2018.csv")
+    X_obs0 <- as.numeric(c(mosq_pools_agg0$Tot_Mosq_Abund)) 
+    X_obs <- as.numeric(c(0, X_obs0 , X_obs, 0))
+    mosq_pools_data <- read.csv("./mosq_pools_data_2018-2019.csv")
+    X2_obs <- as.data.frame(mosq_pools_data %>% filter(Year == 2018))
+    X2_obs <- as.numeric(c(X2_obs$Inf_Mosq_Per_1000))  
+    X2_obs <- as.numeric(c(rep(0, 22), X2_obs, 0))
+    
+    
+    WNV_humans_summary3 <- read.csv("./WNV_humans_summary3_2018-2019.csv")
+    X3_obs <- WNV_humans_summary3 %>% filter(YEAR == 2018)
+    X3_obs <- X3_obs[1:52,]
+    X3_obs <- as.numeric(X3_obs$cases)
+    X3_obs <- cumsum(X3_obs)
+    
+    # Universal dates for 2018
+    training_start_date <- as.Date("2018-01-01")
+    fitting_start_date <- as.Date("2018-02-01")
+    date_gam <- seq(as.Date("2018-01-01"), as.Date("2018-12-28"), by = "week")
+    all_weeks <- seq(training_start_date, by = "weeks", length.out = 52)
+    
+  }else if (Year == 2017) {
+    cat("Loading 2017 data...\n")
+    
+    T_temp <-read.csv("/Users/ko577/County_TEMP_2017.csv")
+    T_temp <- as.data.frame(T_temp)
+    inputTem_i <- as.numeric(T_temp$row_means[1:365])
+    P_temp <-read.csv("/Users/ko577/County_PRCP_2017.csv")
+    P_temp <- as.data.frame(P_temp)
+    inputP_i <- as.numeric(P_temp$row_means[1:365])
+    mosq_pools_agg <- read.csv("./mosq_pools_data.csv")
+    X_obs <- as.data.frame(mosq_pools_agg %>% filter(Year == 2017))
+    X_obs <- as.numeric(c(X_obs$Tot_Mosq_Abund, 0,0)) 
+    
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs <- as.data.frame(mosq_pools_data %>% filter(Year == 2017))
+    X2_obs <- as.numeric(c(X2_obs$Inf_Mosq_Per_1000,0,0))  
+    
+    WNV_humans_summary3 <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs <- WNV_humans_summary3 %>% filter(YEAR == 2017)
+    X3_obs <- X3_obs[-1,]
+    X3_obs <- as.numeric(X3_obs$cases)
+    X3_obs <- cumsum(X3_obs)
+    
+    # Universal dates for 2017
+    training_start_date <- as.Date("2017-01-01")
+    fitting_start_date <- as.Date("2017-02-01")
+    date_gam <- seq(as.Date("2017-01-01"), as.Date("2017-12-28"), by = "week")
+    all_weeks <- seq(training_start_date, by = "weeks", length.out = 52)
+    
+  }else if (Year == 2016) {
+    cat("Loading 2016 data...\n")
+    
+    # Climate data for 2016 (leap year: 366 days)
+    T_temp <- read.csv("./county_temp.csv")
+    column_name <- "rowMeans.combined_temp..na.rm...TRUE."
+    inputTem_i <- as.numeric(T_temp[[column_name]])
+    inputTem_i <- inputTem_i[731:1096]  # Days 731-1096 (366 days for leap year)
+    
+    P_temp <- read.csv("./county_prcp.csv")
+    column_name <- "rowMeans.combined_p..na.rm...TRUE."
+    inputP_i <- as.numeric(P_temp[[column_name]])
+    inputP_i <- inputP_i[731:1096]  # Days 731-1096 (366 days for leap year)
+    
+    # Observation data for 2016 (52 weeks - NO padding)
+    mosq_pools_agg <- read.csv("./mosq_pools_data.csv")
+    X_obs <- as.data.frame(mosq_pools_agg %>% filter(Year == 2016))
+    X_obs <- as.numeric(X_obs$Tot_Mosq_Abund)  # No padding for 2016
+    
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs <- as.data.frame(mosq_pools_data %>% filter(Year == 2016))
+    X2_obs <- as.numeric(X2_obs$Inf_Mosq_Per_1000)  # No padding for 2016
+    
+    WNV_humans_summary3 <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs <- WNV_humans_summary3 %>% filter(YEAR == 2016)
+    X3_obs <- X3_obs[-1,]
+    X3_obs <- as.numeric(X3_obs$cases)
+    X3_obs <- cumsum(X3_obs)
+    
+    # Universal dates for 2016
+    training_start_date <- as.Date("2016-01-01")
+    fitting_start_date <- as.Date("2016-02-01")
+    date_gam <- seq(as.Date("2016-01-01"), as.Date("2016-12-28"), by = "week")
+    all_weeks <- seq(training_start_date, by = "weeks", length.out = 52)
+    
+  }else if (Year == 2015) {
+    cat("Loading 2015 data...\n")
+    
+    # Climate data for 2015
+    T_temp <- read.csv("./county_temp.csv")
+    column_name <- "rowMeans.combined_temp..na.rm...TRUE."
+    inputTem_i <- as.numeric(T_temp[[column_name]])
+    inputTem_i <- inputTem_i[366:730]  # Days 366-730
+    
+    P_temp <- read.csv("./county_prcp.csv")
+    column_name <- "rowMeans.combined_p..na.rm...TRUE."
+    inputP_i <- as.numeric(P_temp[[column_name]])
+    inputP_i <- inputP_i[366:730]  # Days 366-730
+    
+    # Observation data for 2015
+    mosq_pools_agg <- read.csv("./mosq_pools_data.csv")
+    X_obs <- as.data.frame(mosq_pools_agg %>% filter(Year == 2015))
+    X_obs <- as.numeric(c(X_obs$Tot_Mosq_Abund, 0))  # Pad with 0 (51 weeks)
+    
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs <- as.data.frame(mosq_pools_data %>% filter(Year == 2015))
+    X2_obs <- as.numeric(c(X2_obs$Inf_Mosq_Per_1000, 0))  # Pad with 0 (51 weeks)
+    
+    WNV_humans_summary3 <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs <- WNV_humans_summary3 %>% filter(YEAR == 2015)
+    X3_obs <- X3_obs[-1,]
+    X3_obs <- as.numeric(X3_obs$cases)
+    X3_obs <- cumsum(X3_obs)
+    
+    # Universal dates for 2015
+    training_start_date <- as.Date("2015-01-01")
+    fitting_start_date <- as.Date("2015-02-01")
+    date_gam <- seq(as.Date("2015-01-01"), as.Date("2015-12-28"), by = "week")
+    all_weeks <- seq(training_start_date, by = "weeks", length.out = 52)
+    
+  }else if (Year == 2014) {
+    cat("Loading 2014 data...\n")
+    
+    # Climate data for 2014
+    T_temp <- read.csv("./county_temp.csv")
+    column_name <- "rowMeans.combined_temp..na.rm...TRUE."
+    inputTem_i <- as.numeric(T_temp[[column_name]])
+    inputTem_i <- inputTem_i[1:365]  # Days 1-365
+    
+    P_temp <- read.csv("./county_prcp.csv")
+    column_name <- "rowMeans.combined_p..na.rm...TRUE."
+    inputP_i <- as.numeric(P_temp[[column_name]])
+    inputP_i <- inputP_i[1:365]  # Days 1-365
+    
+    # Observation data for 2014
+    mosq_pools_agg <- read.csv("./mosq_pools_data.csv")
+    X_obs <- as.data.frame(mosq_pools_agg %>% filter(Year == 2014)) 
+    X_obs <- as.numeric(c(X_obs$Tot_Mosq_Abund, 0))  # Pad with 0 (51 weeks)
+    
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs <- as.data.frame(mosq_pools_data %>% filter(Year == 2014))
+    X2_obs <- as.numeric(c(X2_obs$Inf_Mosq_Per_1000, 0))  # Pad with 0 (51 weeks)
+    
+    WNV_humans_summary3 <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs <- WNV_humans_summary3 %>% filter(YEAR == 2014)
+    X3_obs <- X3_obs[-1,]
+    X3_obs <- as.numeric(X3_obs$cases)
+    X3_obs <- cumsum(X3_obs)
+    
+    # Universal dates for 2014
+    training_start_date <- as.Date("2014-01-01")
+    fitting_start_date <- as.Date("2014-02-01")
+    date_gam <- seq(as.Date("2014-01-01"), as.Date("2014-12-28"), by = "week")
+    all_weeks <- seq(training_start_date, by = "weeks", length.out = 52)
+    
+  }else if (Year == 2013) {
+    cat("Loading 2013 data...\n")
+    
+    T_temp <-read.csv("/Users/ko577/County_TEMP_2013.csv")
+    T_temp <- as.data.frame(T_temp)
+    inputTem_i <- as.numeric(T_temp$row_means[1:365])
+    P_temp <-read.csv("/Users/ko577/County_PRCP_2013.csv")
+    P_temp <- as.data.frame(P_temp)
+    inputP_i <- as.numeric(P_temp$row_means[1:365])
+    mosq_pools_agg <- read.csv("./mosq_pools_data.csv")
+    X_obs <- as.data.frame(mosq_pools_agg %>% filter(Year == 2013))
+    X_obs <- as.numeric(c(X_obs$Tot_Mosq_Abund, 0)) 
+    
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs <- as.data.frame(mosq_pools_data %>% filter(Year == 2013))
+    X2_obs <- as.numeric(c(X2_obs$Inf_Mosq_Per_1000,0))  
+    
+    WNV_humans_summary3 <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs <- WNV_humans_summary3 %>% filter(YEAR == 2013)
+    X3_obs <- X3_obs[-1,]
+    X3_obs <- as.numeric(X3_obs$cases)
+    X3_obs <- cumsum(X3_obs)
+    
+    # Universal dates for 2013
+    training_start_date <- as.Date("2013-01-01")
+    fitting_start_date <- as.Date("2013-02-01")
+    date_gam <- seq(as.Date("2013-01-01"), as.Date("2013-12-28"), by = "week")
+    all_weeks <- seq(training_start_date, by = "weeks", length.out = 52)
+    
+  }else if (Year == 2012) {
+    cat("Loading 2012 data...\n")
+    
+    # Climate data for 2012
+    T_temp <- read.csv("./county_TEMP_2006-2012.csv")
+    T_temp <- T_temp %>% filter(Year == 2012)
+    inputTem_i <- as.numeric(T_temp$rowMeans.combined_temp..na.rm...TRUE.)
+    
+    
+    P_temp <- read.csv("./county_PRCP_2006-2012.csv")
+    P_temp <- P_temp %>% filter(Year == 2012)
+    inputP_i <- as.numeric(P_temp$rowMeans.combined_p..na.rm...TRUE.)
+    # Observation data for 2012
+    mosq_pools_agg <- read.csv("./mosq_pools_data.csv")
+    X_obs <- as.data.frame(mosq_pools_agg %>% filter(Year == 2012)) 
+    X_obs <- as.numeric(X_obs$Tot_Mosq_Abund)  # Pad with 0 (51 weeks)
+    
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs <- as.data.frame(mosq_pools_data %>% filter(Year == 2012))
+    X2_obs <- as.numeric(X2_obs$Inf_Mosq_Per_1000)  # Pad with 0 (51 weeks)
+    
+    WNV_humans_summary3 <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs <- WNV_humans_summary3 %>% filter(YEAR == 2012)
+    X3_obs <- as.numeric(X3_obs$cases)
+    X3_obs <- cumsum(X3_obs)
+    
+    # Universal dates for 2012
+    training_start_date <- as.Date("2012-01-01")
+    fitting_start_date <- as.Date("2012-02-01")
+    date_gam <- seq(as.Date("2012-01-01"), as.Date("2012-12-28"), by = "week")
+    all_weeks <- seq(training_start_date, by = "weeks", length.out = 52)
+    
+  } else if (Year == 2011) {
+    cat("Loading 2011 data...\n")
+    
+    # Climate data for 2011
+    T_temp <- read.csv("./county_TEMP_2006-2012.csv")
+    T_temp <- T_temp %>% filter(Year == 2011)
+    inputTem_i <- as.numeric(T_temp$rowMeans.combined_temp..na.rm...TRUE.)
+    
+    
+    P_temp <- read.csv("./county_PRCP_2006-2012.csv")
+    P_temp <- P_temp %>% filter(Year == 2011)
+    inputP_i <- as.numeric(P_temp$rowMeans.combined_p..na.rm...TRUE.)
+    
+    # Observation data for 2011
+    mosq_pools_agg <- read.csv("./mosq_pools_data.csv")
+    X_obs <- as.data.frame(mosq_pools_agg %>% filter(Year == 2011))
+    X_obs <- as.numeric(c(X_obs$Tot_Mosq_Abund, 0))  # Pad with 0 (51 weeks)
+    
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs <- as.data.frame(mosq_pools_data %>% filter(Year == 2011))
+    X2_obs <- as.numeric(c(X2_obs$Inf_Mosq_Per_1000, 0))  # Pad with 0 (51 weeks)
+    
+    WNV_humans_summary3 <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs <- WNV_humans_summary3 %>% filter(YEAR == 2011)
+    X3_obs <- X3_obs[-1,]
+    X3_obs <- as.numeric(X3_obs$cases)
+    X3_obs <- cumsum(X3_obs)
+    
+    # Universal dates for 2011
+    training_start_date <- as.Date("2011-01-01")
+    fitting_start_date <- as.Date("2011-02-01")
+    date_gam <- seq(as.Date("2011-01-01"), as.Date("2011-12-28"), by = "week")
+    all_weeks <- seq(training_start_date, by = "weeks", length.out = 52)
+    
+  } else if (Year == 2010) {
+    cat("Loading 2010 data...\n")
+    
+    # Climate data for 2010
+    T_temp <- read.csv("./county_TEMP_2006-2012.csv")
+    T_temp <- T_temp %>% filter(Year == 2010)
+    inputTem_i <- as.numeric(T_temp$rowMeans.combined_temp..na.rm...TRUE.)
+    
+    
+    P_temp <- read.csv("./county_PRCP_2006-2012.csv")
+    P_temp <- P_temp %>% filter(Year == 2010)
+    inputP_i <- as.numeric(P_temp$rowMeans.combined_p..na.rm...TRUE.)
+    
+    # Observation data for 2010 (52 weeks - NO padding)
+    mosq_pools_agg <- read.csv("./mosq_pools_data.csv")
+    X_obs <- as.data.frame(mosq_pools_agg %>% filter(Year == 2010))
+    X_obs <- as.numeric(X_obs$Tot_Mosq_Abund)  
+    
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs <- as.data.frame(mosq_pools_data %>% filter(Year == 2010))
+    X2_obs <- as.numeric(X2_obs$Inf_Mosq_Per_1000)  
+    
+    WNV_humans_summary3 <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs <- WNV_humans_summary3 %>% filter(YEAR == 2010)
+    X3_obs <- X3_obs[-1,]
+    X3_obs <- as.numeric(X3_obs$cases)
+    X3_obs <- cumsum(X3_obs)
+    
+    # Universal dates for 2010
+    training_start_date <- as.Date("2010-01-01")
+    fitting_start_date <- as.Date("2010-02-01")
+    date_gam <- seq(as.Date("2010-01-01"), as.Date("2010-12-28"), by = "week")
+    all_weeks <- seq(training_start_date, by = "weeks", length.out = 52)
+    
+  } else if (Year == 2009) {
+    cat("Loading 2009 data...\n")
+    
+    T_temp <- read.csv("./county_TEMP_2006-2012.csv")
+    T_temp <- T_temp %>% filter(Year == 2009)
+    inputTem_i <- as.numeric(T_temp$rowMeans.combined_temp..na.rm...TRUE.)
+    
+    
+    P_temp <- read.csv("./county_PRCP_2006-2012.csv")
+    P_temp <- P_temp %>% filter(Year == 2009)
+    inputP_i <- as.numeric(P_temp$rowMeans.combined_p..na.rm...TRUE.)
+    
+    mosq_pools_agg <- read.csv("./mosq_pools_data.csv")
+    X_obs <- as.data.frame(mosq_pools_agg %>% filter(Year == 2009))
+    X_obs <- as.numeric(X_obs$Tot_Mosq_Abund) 
+    
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs <- as.data.frame(mosq_pools_data %>% filter(Year == 2009))
+    X2_obs <- as.numeric(X2_obs$Inf_Mosq_Per_1000)  
+    
+    WNV_humans_summary3 <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs <- WNV_humans_summary3 %>% filter(YEAR == 2009)
+    X3_obs <- X3_obs[-1,]
+    X3_obs <- as.numeric(X3_obs$cases)
+    X3_obs <- cumsum(X3_obs)
+    
+    # Universal dates for 2009
+    training_start_date <- as.Date("2009-01-01")
+    fitting_start_date <- as.Date("2009-02-01")
+    date_gam <- seq(as.Date("2009-01-01"), as.Date("2009-12-28"), by = "week")
+    all_weeks <- seq(training_start_date, by = "weeks", length.out = 52)
+    
+  }else if (Year == 2008) {
+    cat("Loading 2008 data...\n")
+    
+    T_temp <- read.csv("./county_TEMP_2006-2012.csv")
+    T_temp <- T_temp %>% filter(Year == 2008)
+    inputTem_i <- as.numeric(T_temp$rowMeans.combined_temp..na.rm...TRUE.)
+    
+    
+    P_temp <- read.csv("./county_PRCP_2006-2012.csv")
+    P_temp <- P_temp %>% filter(Year == 2008)
+    inputP_i <- as.numeric(P_temp$rowMeans.combined_p..na.rm...TRUE.)
+    mosq_pools_agg <- read.csv("./mosq_pools_data.csv")
+    X_obs <- as.data.frame(mosq_pools_agg %>% filter(Year == 2008))
+    X_obs <- as.numeric(X_obs$Tot_Mosq_Abund) 
+    
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs <- as.data.frame(mosq_pools_data %>% filter(Year == 2008))
+    X2_obs <- as.numeric(X2_obs$Inf_Mosq_Per_1000)  
+    
+    WNV_humans_summary3 <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs <- WNV_humans_summary3 %>% filter(YEAR == 2008)
+    X3_obs <- X3_obs[-1,]
+    X3_obs <- as.numeric(X3_obs$cases)
+    X3_obs <- cumsum(X3_obs)
+    
+    # Universal dates for 2008
+    training_start_date <- as.Date("2008-01-01")
+    fitting_start_date <- as.Date("2008-02-01")
+    date_gam <- seq(as.Date("2008-01-01"), as.Date("2008-12-28"), by = "week")
+    all_weeks <- seq(training_start_date, by = "weeks", length.out = 52)
+    
+  }else if (Year == 2007) {
+    cat("Loading 2007 data...\n")
+    
+    T_temp <- read.csv("./county_TEMP_2006-2012.csv")
+    T_temp <- T_temp %>% filter(Year == 2007)
+    inputTem_i <- as.numeric(T_temp$rowMeans.combined_temp..na.rm...TRUE.)
+    
+    
+    P_temp <- read.csv("./county_PRCP_2006-2012.csv")
+    P_temp <- P_temp %>% filter(Year == 2007)
+    inputP_i <- as.numeric(P_temp$rowMeans.combined_p..na.rm...TRUE.)
+    mosq_pools_agg <- read.csv("./mosq_pools_data.csv")
+    X_obs <- as.data.frame(mosq_pools_agg %>% filter(Year == 2007))
+    X_obs <- as.numeric(c(X_obs$Tot_Mosq_Abund,0,0)) 
+    
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs <- as.data.frame(mosq_pools_data %>% filter(Year == 2007))
+    X2_obs <- as.numeric(c(X2_obs$Inf_Mosq_Per_1000,0,0))  
+    
+    WNV_humans_summary3 <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs <- WNV_humans_summary3 %>% filter(YEAR == 2007)
+    X3_obs <- X3_obs[-1,]
+    X3_obs <- as.numeric(X3_obs$cases)
+    X3_obs <- cumsum(X3_obs)
+    
+    # Universal dates for 2007
+    training_start_date <- as.Date("2007-01-01")
+    fitting_start_date <- as.Date("2007-02-01")
+    date_gam <- seq(as.Date("2007-01-01"), as.Date("2007-12-28"), by = "week")
+    all_weeks <- seq(training_start_date, by = "weeks", length.out = 52)
+    
+  }else if (Year == 2006) {
+    cat("Loading 2006 data...\n")
+    T_temp <- read.csv("./county_TEMP_2006-2012.csv")
+    T_temp <- T_temp %>% filter(Year == 2006)
+    inputTem_i <- as.numeric(T_temp$rowMeans.combined_temp..na.rm...TRUE.)
+    
+    
+    P_temp <- read.csv("./county_PRCP_2006-2012.csv")
+    P_temp <- P_temp %>% filter(Year == 2006)
+    inputP_i <- as.numeric(P_temp$rowMeans.combined_p..na.rm...TRUE.)
+    mosq_pools_agg <- read.csv("./mosq_pools_data.csv")
+    X_obs <- as.data.frame(mosq_pools_agg %>% filter(Year == 2006))
+    X_obs <- as.numeric(X_obs$Tot_Mosq_Abund) 
+    
+    mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+    X2_obs <- as.data.frame(mosq_pools_data %>% filter(Year == 2006))
+    X2_obs <- as.numeric(X2_obs$Inf_Mosq_Per_1000)  
+    
+    WNV_humans_summary3 <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+    X3_obs <- WNV_humans_summary3 %>% filter(YEAR == 2006)
+    X3_obs <- as.numeric(X3_obs$cases)
+    X3_obs <- cumsum(X3_obs)
+    
+    # Universal dates for 2006
+    training_start_date <- as.Date("2006-01-01")
+    fitting_start_date <- as.Date("2006-02-01")
+    date_gam <- seq(as.Date("2006-01-01"), as.Date("2006-12-28"), by = "week")
+    all_weeks <- seq(training_start_date, by = "weeks", length.out = 52)
+    
+  }else {
+    stop("Year must be one of: 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020 or 2021")
+  }
+  
+  # Common observation setup
+  X0_obs <- X3_obs
+  X_obs1 <- X_obs
+  X_obs2 <- X2_obs
+  
+  # Forecast date setup (derived from all_weeks)
+  observed_dates <- all_weeks
+  forecast_1week_dates <- all_weeks[6:51]
+  forecast_2week_dates <- all_weeks[7:52]
 # Model Parameters
 time_initial <- 1
 time_final <- 52
@@ -112,14 +657,14 @@ ou_lambda_r = 1 / 14;
 # #inputP_i <-inputP_i[1096:1461]
 
 #2014 climate data
-T_temp <- read.csv("./county_temp.csv")
-column_name <- "rowMeans.combined_temp..na.rm...TRUE."
-inputTem_i  <- as.numeric(T_temp[[column_name]])
-inputTem_i  <-inputTem_i[1:365]
-P_temp <- read.csv("./county_prcp.csv")
-column_name <- "rowMeans.combined_p..na.rm...TRUE."
-inputP_i <- as.numeric(P_temp[[column_name]])
-inputP_i <-inputP_i[1:365]
+# T_temp <- read.csv("./county_temp.csv")
+# column_name <- "rowMeans.combined_temp..na.rm...TRUE."
+# inputTem_i  <- as.numeric(T_temp[[column_name]])
+# inputTem_i  <-inputTem_i[1:365]
+# P_temp <- read.csv("./county_prcp.csv")
+# column_name <- "rowMeans.combined_p..na.rm...TRUE."
+# inputP_i <- as.numeric(P_temp[[column_name]])
+# inputP_i <-inputP_i[1:365]
 
 
 # Function to adjust temperature based on parameters
@@ -253,7 +798,7 @@ WNV_model <- function(sirWNV_ensemble, Vm_t, r_t, T_temp, P_temp, par_input, wee
               temp_growth2 - mu1 * Sb) * dt
     # JOE: I'm removing mu1 from dIb 
     #dIb <- (temp_growth2 - (mu1 + par["gamma"]) * Ib) * dt
-    dIb <- (temp_growth2 - (par["gamma"]) * Ib) * dt
+    dIb <- (temp_growth2 - (mu1 + par["gamma"]) * Ib) * dt
     dRb <- (par["gamma"] * Ib - mu1 * Rb) * dt
     #dRb <- (par["gamma"] * Ib) * dt
     
@@ -313,29 +858,29 @@ WNV_model <- function(sirWNV_ensemble, Vm_t, r_t, T_temp, P_temp, par_input, wee
 
 
 # Observation data 2014
-mosq_pools_agg <- read.csv("./Downloads/mosq_pools_agg.csv")
-X_obs <- mosq_pools_agg$sum_cluster_Abund[1:51] #total mosquito abundance data
-X_obs = as.numeric(c(X_obs,0))
-mosq_pools_data <- read.csv("./mosq_pools_data.csv")
-X2_obs = mosq_pools_data %>% filter(Year == 2014)
-X2_obs = as.numeric(c(X2_obs$Inf_Mosq_Per_1000,0)) #Inf_Mosq_Per_1000 data
-
-WNV_humans_summary3 <- read.csv("./WNV_humans_summary3_2006-2017.csv")
-X3_obs = WNV_humans_summary3 %>% filter(YEAR == 2014)
-X3_obs = X3_obs[-1,]
-X3_obs = as.numeric(X3_obs$cases)
-X3_obs <- cumsum(X3_obs)
-
-X0_obs = X3_obs #human
-X_obs1 = X_obs #abund
-X_obs2 = X2_obs #infm1000
+# mosq_pools_agg <- read.csv("./Downloads/mosq_pools_agg.csv")
+# X_obs <- mosq_pools_agg$sum_cluster_Abund[1:51] #total mosquito abundance data
+# X_obs = as.numeric(c(X_obs,0))
+# mosq_pools_data <- read.csv("./mosq_pools_data.csv")
+# X2_obs = mosq_pools_data %>% filter(Year == 2014)
+# X2_obs = as.numeric(c(X2_obs$Inf_Mosq_Per_1000,0)) #Inf_Mosq_Per_1000 data
+# 
+# WNV_humans_summary3 <- read.csv("./WNV_humans_summary3_2006-2017.csv")
+# X3_obs = WNV_humans_summary3 %>% filter(YEAR == 2014)
+# X3_obs = X3_obs[-1,]
+# X3_obs = as.numeric(X3_obs$cases)
+# X3_obs <- cumsum(X3_obs)
+# 
+# X0_obs = X3_obs #human
+# X_obs1 = X_obs #abund
+# X_obs2 = X2_obs #infm1000
 
 
 pop <- read.csv("./maricopa_population_2006-2021.csv")
 # ====================================================================
 # Sequential WNV Ensemble Kalman Filter
 # ====================================================================
-{
+#{
 # Define parameters
 num_iterations <- 46
 results <- list()
@@ -431,7 +976,7 @@ ensemble <- rbind(
 
 param_names <- c("Tmi", "Tma", "alpha", "phi", "Tmb", "d", 
                  "Tbm", "gamma", "tau", "Vb", "Tmh", "psi")
-}
+#}
 # ====================================================================
 # Main iteration loop
 # ====================================================================
@@ -1399,16 +1944,12 @@ for (iteration in 1:num_iterations) {
   )
 }
 
-saveRDS(results, file = paste0("results_FullModel_", Year, ".rds"))
+#saveRDS(results, file = paste0("results_FullModel_", Year, ".rds"))
 
-results <- readRDS(paste0("results_FullModel_", Year, ".rds"))
+#results <- readRDS(paste0("results_FullModel_", Year, ".rds"))
 
 
-library(dplyr)
-library(tidyr)
-library(purrr)
-library(epipredict)
-library(distributional)
+
 
 #####################################
 ## Convert Custom Results to       ##
@@ -1690,23 +2231,23 @@ wis_all <- calculate_wis_all_targets(
 )
 
 saveRDS(wis_all, file = paste0("wis_all_FullModel_", Year, ".rds"))
-wis_all <- readRDS(paste0("wis_all_FullModel_", Year, ".rds")) 
+#wis_all <- readRDS(paste0("wis_all_FullModel_", Year, ".rds")) 
 # 
 # # 2. Summarize WIS
 wis_summary <- summarize_wis_results(wis_all)
-print(wis_summary)
+#print(wis_summary)
 # 
 # # 3. Calculate normalized WIS
 normalized_wis <- calculate_normalized_wis_custom(wis_all)
-print(normalized_wis)
+#print(normalized_wis)
 # 
 # # 4. Visualize
-plot_wis_custom_results(wis_all, add_dates = TRUE, start_date = forecast_1week_dates[1])
-plot_wis_summary_custom(wis_summary)
+#plot_wis_custom_results(wis_all, add_dates = TRUE, start_date = forecast_1week_dates[1])
+#plot_wis_summary_custom(wis_summary)
 # 
 # # 5. Access individual components
-head(wis_all$abundance_1wk)
-head(wis_all$cases_2wk)
+#head(wis_all$abundance_1wk)
+#head(wis_all$cases_2wk)
 # 
 
 
@@ -1722,28 +2263,28 @@ head(wis_all$cases_2wk)
 
 # Training period dates (what the model was fitted on)
 # Starts at week 5 (iteration 1 uses weeks 1-5)
-training_start_date <- as.Date("2014-01-01")  # Week 1
-fitting_start_date <- as.Date("2014-02-01")    # Week 5 (iteration 1)
+#training_start_date <- as.Date("2014-01-01")  # Week 1
+#fitting_start_date <- as.Date("2014-02-01")    # Week 5 (iteration 1)
 
 # Create dates for all 52 weeks in 2014
-all_weeks_2014 <- seq(training_start_date, by = "weeks", length.out = 52)
+#all_weeks_2014 <- seq(training_start_date, by = "weeks", length.out = 52)
 
 # Dates for observations (all 52 weeks)
-observed_dates <- all_weeks_2014
+#observed_dates <- all_weeks_2014
 
 # Dates for 1-week-ahead forecasts (iterations 1-46)
 # Iteration 1: uses weeks 1-5, forecasts week 6
 # Iteration 2: uses weeks 1-6, forecasts week 7
 # ...
 # Iteration 46: uses weeks 1-50, forecasts week 51
-forecast_1week_dates <- all_weeks_2014[6:51]  # Weeks 6-51 (46 forecasts)
+#forecast_1week_dates <- all_weeks_2014[6:51]  # Weeks 6-51 (46 forecasts)
 
 # Dates for 2-week-ahead forecasts (iterations 1-46)
 # Iteration 1: uses weeks 1-5, forecasts week 7
 # Iteration 2: uses weeks 1-6, forecasts week 8
 # ...
 # Iteration 46: uses weeks 1-50, forecasts week 52
-forecast_2week_dates <- all_weeks_2014[7:52]  # Weeks 7-52 (46 forecasts)
+#forecast_2week_dates <- all_weeks_2014[7:52]  # Weeks 7-52 (46 forecasts)
 
 # ====================================================================
 # Verify alignment
@@ -2071,7 +2612,7 @@ Q3 <- ggplot() +
   ) +
   scale_x_date(date_breaks = "2 month", date_labels = "%b %Y")
 
-print(Q3)
+#print(Q3)
 
 # 2-WEEK AHEAD - Infectious_Mosq_1000
 plot_data8 <- map_dfr(1:num_iterations, ~ {
@@ -2145,7 +2686,7 @@ Q4 <- ggplot() +
   ) +
   scale_x_date(date_breaks = "2 month", date_labels = "%b %Y")
 
-print(Q4)
+#print(Q4)
 # 1-WEEK AHEAD - Total Abundance
 plot_data5 <- map_dfr(1:num_iterations, ~ {
   forecast_data <- results[[.x]]$total_abundance_q_1
@@ -2297,7 +2838,12 @@ ggsave(paste0("Q3_iteration0FULL_", iteration, "_", Year, ".png"), plot = Q3, wi
 ggsave(paste0("Q4_iteration0FULL_", iteration, "_", Year, ".png"), plot = Q4, width = 10, height = 8, dpi = 300)
 ggsave(paste0("Q5_iteration0FULL_", iteration, "_", Year, ".png"), plot = Q5, width = 10, height = 8, dpi = 300)
 ggsave(paste0("Q6_iteration0FULL_", iteration, "_", Year, ".png"), plot = Q6, width = 10, height = 8, dpi = 300)
+saveRDS(results, file = paste0("results_FullModel_", Year, ".rds"))
 
+cat("\nYear", Year, "complete. Results saved.\n")
+}
+
+cat("\nAll years complete.\n")
 
 #####################################
 ## FluSight-Style Fan Chart Plot   ##
