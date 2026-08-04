@@ -26,5 +26,5 @@ Each script fits and forecasts one of the four model configurations using the En
 
 | Folder | Description |
 |---|---|
-| `datasets/` | Raw and processed input data: weekly mosquito trap counts, mosquito pool testing results (for IM1000), human WNV case counts, and daily temperature/precipitation series from PRISM. |
+| `datasets/` | Raw and processed input data: weekly mosquito trap counts, mosquito pool testing results (for IM1000), human WNV case counts, and daily temperature/precipitation from PRISM. |
 | `outputs/` | Saved model outputs, including posterior ensemble arrays, fit and forecast WIS objects, and ensemble forecast results used to generate the manuscript's figures and tables. |
