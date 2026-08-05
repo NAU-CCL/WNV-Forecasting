@@ -547,7 +547,7 @@ for (Year in years_to_run) {
   forecast_1week_dates <- all_weeks[6:51]
   forecast_2week_dates <- all_weeks[7:52]
 # ============================================================
-# SIMPLIFIED ENSEMBLE: ALL DATA, NO TRAIN/EVAL SPLIT
+# ENSEMBLE: ALL DATA, NO TRAIN/EVAL SPLIT
 # Weekly WIS output with dates
 # ============================================================
 
@@ -569,7 +569,7 @@ TARGET_CONFIG <- list(
 )
 
 # ============================================================
-# STEP 1: LOAD ALL MODEL QUANTILES (same as before)
+# LOAD ALL MODEL QUANTILES (same as before)
 # ============================================================
 
 load_all_model_quantiles <- function(year, obs_list) {
@@ -624,7 +624,7 @@ load_all_model_quantiles <- function(year, obs_list) {
 }
 
 # ============================================================
-# STEP 2: WIS HELPER (your epipredict function)
+# WIS HELPER (your epipredict function)
 # ============================================================
 
 compute_wis_single_epipredict <- function(q_vec, actual) {
@@ -644,7 +644,7 @@ compute_wis_vec <- function(q_matrix, actuals) {
 }
 
 # ============================================================
-# STEP 3: BUILD ENSEMBLE QUANTILE MATRICES (all iterations)
+BUILD ENSEMBLE QUANTILE MATRICES (all iterations)
 # ============================================================
 
 build_ens_avg <- function(q_array) {
@@ -737,7 +737,7 @@ build_ens_wis <- function(q_array, actuals) {
 }
 
 # ============================================================
-# STEP 4: CONVERT TO WEEKLY WIS TIBBLE WITH DATES
+CONVERT TO WEEKLY WIS TIBBLE WITH DATES
 # ============================================================
 
 ensemble_to_weekly_wis <- function(ens_q_matrix, actuals, target_key,
@@ -769,7 +769,7 @@ ensemble_to_weekly_wis <- function(ens_q_matrix, actuals, target_key,
 }
 
 # ============================================================
-# STEP 5: MAIN FUNCTION — ALL DATA, NO SPLIT
+MAIN FUNCTION — ALL DATA, NO SPLIT
 # ============================================================
 
 run_ensembles_all_data <- function(year, obs_list, observed_dates) {
@@ -829,7 +829,7 @@ run_ensembles_all_data <- function(year, obs_list, observed_dates) {
 }
 
 # ============================================================
-# STEP 6: RUN FOR A SINGLE YEAR
+# RUN FOR A SINGLE YEAR
 # ============================================================
 
 #Year <- 2006
@@ -866,7 +866,7 @@ TARGET_CONFIG <- list(
 )
 
 # ============================================================
-# STEP 1: BUILD LINEAR POOL QUANTILE MATRIX
+# BUILD LINEAR POOL QUANTILE MATRIX
 # ============================================================
 # How it works:
 #   1. For each model, the 23 quantile values define its CDF
@@ -876,7 +876,7 @@ TARGET_CONFIG <- list(
 #   5. Invert the pooled CDF to recover the 23 target quantile levels
 
 # ============================================================
-# ROBUST LINEAR POOL (Final Fixed Version)
+# LINEAR POOL 
 # ============================================================
 
 build_linear_pool <- function(q_array,
@@ -987,7 +987,7 @@ build_linear_pool <- function(q_array,
 }
 
 # ============================================================
-# STEP 2: WIS HELPER (your epipredict function)
+# WIS HELPER (epipredict function)
 # ============================================================
 
 compute_wis_single_epipredict <- function(q_vec, actual) {
@@ -1003,7 +1003,7 @@ compute_wis_single_epipredict <- function(q_vec, actual) {
 }
 
 # ============================================================
-# STEP 3: CONVERT TO WEEKLY WIS TIBBLE WITH DATES
+# CONVERT TO WEEKLY WIS TIBBLE WITH DATES
 # ============================================================
 
 ensemble_to_weekly_wis <- function(ens_q_matrix, actuals, target_key,
@@ -1030,7 +1030,7 @@ ensemble_to_weekly_wis <- function(ens_q_matrix, actuals, target_key,
 }
 
 # ============================================================
-# STEP 4: LOAD MODEL QUANTILES
+# LOAD MODEL QUANTILES
 # ============================================================
 
 load_all_model_quantiles <- function(year, obs_list) {
@@ -1085,7 +1085,7 @@ load_all_model_quantiles <- function(year, obs_list) {
 }
 
 # ============================================================
-# STEP 5: MAIN FUNCTION
+# MAIN FUNCTION
 # ============================================================
 
 run_linear_pool <- function(year, obs_list, observed_dates, weights = NULL) {
@@ -1119,7 +1119,7 @@ run_linear_pool <- function(year, obs_list, observed_dates, weights = NULL) {
 }
 
 # ============================================================
-# STEP 6: RUN FOR A SINGLE YEAR
+# RUN FOR A SINGLE YEAR
 # ============================================================
 
 #Year <- 2006
@@ -1584,7 +1584,7 @@ ggsave("log_mean_rel_wis_by_month_horizon2.pdf", mean_h2_month, width = 14, heig
 
 
 # ================================================
-# 1. Load and combine all yearly data
+# Load and combine all yearly data
 # ================================================
 years <- c(2006:2019, 2021)
 
@@ -1594,7 +1594,7 @@ all_data <- map_df(years, function(year) {
 })
 
 # ================================================
-# 2. Clean model names
+# Clean model names
 # ================================================
 all_data <- all_data %>%
   mutate(model = recode(model,
@@ -1605,7 +1605,7 @@ all_data <- all_data %>%
   ))
 
 # ================================================
-# 3. Prepare heatmap data
+# Prepare heatmap data
 # ================================================
 heatmap_data <- all_data %>%
   filter(is.finite(rel_wis)) %>%
@@ -1624,7 +1624,7 @@ heatmap_data <- all_data %>%
   )
 
 # ================================================
-# 4. ORDER MODELS CONSISTENTLY (using rev(sort(unique)))
+# ORDER MODELS CONSISTENTLY (using rev(sort(unique)))
 # ================================================
 model_order <- rev(sort(unique(heatmap_data$model)))
 
@@ -1632,7 +1632,7 @@ heatmap_data <- heatmap_data %>%
   mutate(model = factor(model, levels = model_order))
 
 # ================================================
-# 5. Define targets
+# Define targets
 # ================================================
 targets_list <- c(
   "Total abundance"          = "Total abundance",
@@ -1641,7 +1641,7 @@ targets_list <- c(
 )
 
 # ================================================
-# 6. Plotting function
+# Plotting function
 # ================================================
 plot_heatmap <- function(target_name, target_value, horizon_value) {
   
@@ -1697,7 +1697,7 @@ plot_heatmap <- function(target_name, target_value, horizon_value) {
 }
 
 # ================================================
-# 7. Generate all 6 plots
+#  Generate all 6 plots
 # ================================================
 for (tgt in names(targets_list)) {
   for (h in c(1, 2)) {
@@ -1729,7 +1729,7 @@ for (tgt in names(targets_list)) {
 message("All 6 heatmaps have been generated successfully!")
 
 
-# Adjust filename pattern to match your saved files
+#  saved files
 ensemble4_files <- list("Ensemble_model_4" = "all_wis_longE_")
 
 ensemble4_monthly <- map_dfr(names(ensemble4_files), function(model_name) {
@@ -1763,10 +1763,10 @@ ensemble4_monthly <- map_dfr(names(ensemble4_files), function(model_name) {
   })
 })
 
-# Verify it worked
+
 print(ensemble4_monthly)
 
-# Continue with the rest of your analysis
+
 ensemble4_relwis_monthly <- ensemble4_monthly %>%
   left_join(baseline_join, by = c("year", "horizon", "target", "iteration")) %>%
   filter(is.finite(WIS), is.finite(WIS_baseline), WIS_baseline > 0) %>%
