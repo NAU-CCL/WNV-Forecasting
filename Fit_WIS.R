@@ -3069,7 +3069,60 @@ median_year_val <- median(claim3_by_year$mean_across_models)
 claim3_by_year %>% mutate(dist_from_median = abs(mean_across_models - median_year_val)) %>%
   arrange(dist_from_median) %>% head(3)
 
+# ════════════════════════════════════════════════════════════════
+# CLAIM 3 (corrected): IM1000 fit WIS by year — use MEAN, not median,
+# since IM1000 is zero-inflated in early/late season weeks
+# ════════════════════════════════════════════════════════════════
+claim3_mean <- fit_wis_all %>%
+  filter(target == "infectious_per_1000") %>%
+  group_by(year, model) %>%
+  summarise(mean_fit_WIS = mean(WIS, na.rm = TRUE), .groups = "drop")
 
+claim3_mean_by_year <- claim3_mean %>%
+  group_by(year) %>%
+  summarise(mean_across_models = mean(mean_fit_WIS, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(mean_across_models))
+print(claim3_mean_by_year, n = 20)
+
+claim3_mean %>% filter(year %in% c(2012, 2021)) %>% arrange(year, model) %>% print(n = 20)
+
+# restrict to "active season" weeks only
+# (where observed IM1000 > 0), so we're comparing fit quality
+# specifically during weeks where there's a real signal to fit 
+claim3_active <- fit_wis_all %>%
+  filter(target == "infectious_per_1000", actual > 0) %>%
+  group_by(year, model) %>%
+  summarise(
+    mean_fit_WIS_active = mean(WIS, na.rm = TRUE),
+    n_active_weeks      = n(),
+    .groups = "drop"
+  )
+
+claim3_active_by_year <- claim3_active %>%
+  group_by(year) %>%
+  summarise(mean_across_models = mean(mean_fit_WIS_active, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(mean_across_models))
+print(claim3_active_by_year, n = 20)
+
+claim3_active %>% filter(year %in% c(2012, 2021)) %>% arrange(year, model) %>% print(n = 20)
+# ── Median fit WIS, restricted to active-season weeks (actual > 0) ────────────
+claim3_median_active <- fit_wis_all %>%
+  filter(target == "infectious_per_1000", actual > 0) %>%
+  group_by(year, model) %>%
+  summarise(
+    median_fit_WIS_active = median(WIS, na.rm = TRUE),
+    n_active_weeks         = n(),
+    .groups = "drop"
+  )
+
+claim3_median_active_by_year <- claim3_median_active %>%
+  group_by(year) %>%
+  summarise(mean_across_models = mean(median_fit_WIS_active, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(mean_across_models))
+print(claim3_median_active_by_year, n = 20)
+
+claim3_median_active %>% filter(year %in% c(2006, 2012, 2019, 2021)) %>%
+  arrange(year, model) %>% print(n = 20)
 library(dplyr)
 library(ggplot2)
 
