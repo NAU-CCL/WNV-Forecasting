@@ -64,7 +64,7 @@ for (Year in years_to_run) {
     column_name <- "rowMeans.combined_temp..na.rm...TRUE."
     inputTem_i <- as.numeric(T_temp[[column_name]])
     inputTem_i <- inputTem_i[1:366]  # 2020 subset (365 days)
-    P_temp <-read.csv("/Users/ko577/county_prcp_2020.csv")
+    P_temp <-read.csv("./county_prcp_2020.csv")
     column_name <- "rowMeans.combined_p..na.rm...TRUE."
     inputTem_i <- as.numeric(T_temp[[column_name]])
     mosq_pools_agg <- read.csv("./mosq_pools_agg_2020.csv")
@@ -89,11 +89,11 @@ for (Year in years_to_run) {
   }else if (Year == 2019) {
     cat("Loading 2019 data...\n")
     
-    T_temp <-read.csv("/Users/ko577/Downloads/county_temp_2018-2019.csv")
+    T_temp <-read.csv("./county_temp_2018-2019.csv")
     column_name <- "rowMeans.combined_temp..na.rm...TRUE."
     inputTem_i <- as.numeric(T_temp[[column_name]])
     inputTem_i <- inputTem_i[366:730]
-    P_temp <-read.csv("/Users/ko577/Downloads/county_prcp_2018-2019.csv")
+    P_temp <-read.csv("./county_prcp_2018-2019.csv")
     column_name <- "rowMeans.combined_p..na.rm...TRUE."
     inputP_i <- as.numeric(P_temp[[column_name]])
     inputP_i <- inputP_i[366:730]
@@ -122,12 +122,12 @@ for (Year in years_to_run) {
   }else if (Year == 2018) {
     cat("Loading 2018 data...\n")
     
-    T_temp <-read.csv("/Users/ko577/Downloads/county_temp_2018-2019.csv")
+    T_temp <-read.csv("./county_temp_2018-2019.csv")
     column_name <- "rowMeans.combined_temp..na.rm...TRUE."
     inputTem_i <- as.numeric(T_temp[[column_name]])
     inputTem_i <- inputTem_i[1:365]
     
-    P_temp <-read.csv("/Users/ko577/Downloads/county_prcp_2018-2019.csv")
+    P_temp <-read.csv("./county_prcp_2018-2019.csv")
     column_name <- "rowMeans.combined_p..na.rm...TRUE."
     inputP_i <- as.numeric(P_temp[[column_name]])
     inputP_i <- inputP_i[1:365]
@@ -159,10 +159,10 @@ for (Year in years_to_run) {
   }else if (Year == 2017) {
     cat("Loading 2017 data...\n")
     
-    T_temp <-read.csv("/Users/ko577/County_TEMP_2017.csv")
+    T_temp <-read.csv("./County_TEMP_2017.csv")
     T_temp <- as.data.frame(T_temp)
     inputTem_i <- as.numeric(T_temp$row_means[1:365])
-    P_temp <-read.csv("/Users/ko577/County_PRCP_2017.csv")
+    P_temp <-read.csv("./County_PRCP_2017.csv")
     P_temp <- as.data.frame(P_temp)
     inputP_i <- as.numeric(P_temp$row_means[1:365])
     mosq_pools_agg <- read.csv("./mosq_pools_data.csv")
@@ -293,10 +293,10 @@ for (Year in years_to_run) {
   }else if (Year == 2013) {
     cat("Loading 2013 data...\n")
     
-    T_temp <-read.csv("/Users/ko577/County_TEMP_2013.csv")
+    T_temp <-read.csv("./County_TEMP_2013.csv")
     T_temp <- as.data.frame(T_temp)
     inputTem_i <- as.numeric(T_temp$row_means[1:365])
-    P_temp <-read.csv("/Users/ko577/County_PRCP_2013.csv")
+    P_temp <-read.csv("./County_PRCP_2013.csv")
     P_temp <- as.data.frame(P_temp)
     inputP_i <- as.numeric(P_temp$row_means[1:365])
     mosq_pools_agg <- read.csv("./mosq_pools_data.csv")
