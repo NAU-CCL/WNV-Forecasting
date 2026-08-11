@@ -15,6 +15,7 @@ library(tidyr)
 library(purrr)
 library(epipredict)
 library(distributional)
+library(grid)
 #Year <- 2017
 years_to_run <- c(2006:2019, 2021)
 #years_to_run <- c(2006:2019)
@@ -565,8 +566,8 @@ dt <- 1
 time_vector <- seq(time_initial, time_final, by = 1)
 N <- 8000  # Number of ensemble
 #sig_2 <- 0.5  
-mu1 <- 1/120 #0.12 #JOE mistake? (this is bird death)
-mu <- 0.05 #0.12 #JOE mistake (this is mosquito death)
+mu1 <- 1/120 
+mu <- 0.05 
 i_year <- c(
   "2006" = 100,
   "2007" = 100,
@@ -607,13 +608,13 @@ OUproc_func = function(this_prev, mu, lambda, sigma, dt=1){
   return(this_next)
 }
 
-# JOE
+
 # OU params
 ou_mu_vm = log(1.0) # log scale
 ou_lambda_vm = 1 / 14
-ou_sigma_vm = 3.10 #multiply this by 3
+ou_sigma_vm = 3.10 
 
-#ou_mu_r = log(0.001);
+
 ou_lambda_r = 1 / 14;
 
 # WNV Model Function
@@ -717,7 +718,7 @@ WNV_model <- function(sirWNV_ensemble, Vm_t, r_t, par_input, week) {
 }
 
 pop <- read.csv("./maricopa_population_2006-2021.csv")
-#{
+
 # Updated observation noise covariance 
 R <- diag(c(5.0, 0.001, 0.05))
 
@@ -810,7 +811,7 @@ ensemble <- rbind(Sm_init_particles, Im_init_particles, Sb_init_particles, Ib_in
                   Tmh_particles, psi_particles)
 
 param_names <- c("Tmb", "d", "Tbm", "gamma", "tau", "Vb", "Tmh", "psi")
-#}
+
 obs_year <- c(
   "2006" = 18,
   "2007" = 18,
@@ -906,43 +907,7 @@ for (iteration in 1:num_iterations) {
       # Update ensemble states
       ensemble[1:8, i] <- sirWNV_output
     }
-    # Vm_t_particles = OUproc_func(exp(ensemble[9, ]),
-    #                              mu = ou_mu_vm,
-    #                              lambda = ou_lambda_vm,
-    #                              sigma = ou_sigma_vm)
-    # log_Vm_t_particles = log(Vm_t_particles)
-    # 
-    # ensemble[9, ] <- log_Vm_t_particles
-    # 
-    # #JOE:
-    # # Time-varying sigma for log(r)
-    # 
-    # if (obs_index<as.numeric(obs_year[as.character(Year)])) {#adjust when you observe data earlier 18
-    #   ou_sigma_r <- 0.002
-    #   ou_mu_r = log(0.001)
-    # } else {
-    #   ou_sigma_r <- 1.50
-    #   ou_mu_r = log(0.05)
-    # }
-    # 
-    # # Adaptive scaling based on observations
-    # # JOE: unnecessary scale_factor here
-    # # scale_factor <-  5
-    # 
-    # 
-    # # Store diagnostics
-    # #scale_factor_history[obs_index] <- scale_factor
-    # sigma_t_history[obs_index] <- ou_sigma_r
-    # 
-    # # Add process noise to log(r)
-    # #JOE:
-    # #log_r_t_particles <- ensemble[10, ] + sigma_t * rnorm(N)
-    # r_t_particles = OUproc_func(exp(ensemble[10, ]),
-    #                             mu = ou_mu_r,
-    #                             lambda = ou_lambda_r,
-    #                             sigma = ou_sigma_r)
-    # log_r_t_particles = log(r_t_particles)
-    # ensemble[10, ] <- log_r_t_particles
+   
     
     # Apply thresholds
     tmp_Sm <- ensemble[1, ]
@@ -1168,16 +1133,6 @@ df_diagnostics <- data.frame(
 # Plotting
 # ====================================================================
 
-# Plot scale_factor
-# p1 <- ggplot(df_diagnostics, aes(x = as.Date(date), y = scale_factor)) +
-#   geom_line(color = "blue", size = 1) +
-#   geom_point(color = "blue", size = 2) +
-#   labs(title = paste("Scale Factor over Time - Iteration", iteration),
-#        x = "Date", y = "Scale Factor") +
-#   theme_minimal() +
-#   theme(axis.title = element_text(size = 14),
-#         axis.text = element_text(size = 12),
-#         plot.title = element_text(size = 16))
 
 # Plot sigma_t
 p2 <- ggplot(df_diagnostics, aes(x = as.Date(date), y = sigma_t)) +
@@ -1405,14 +1360,14 @@ S12 <- ggplot() +
     #ggsave(paste0("A35_iteration0FULL0_", iteration, ".png"), plot = p1, width = 10, height = 8, dpi = 300)
     ggsave(paste0("A36_iteration0FULL0_", iteration, "_", Year, ".png"), plot = p2, width = 10, height = 8, dpi = 300)
     # --- Parameter histograms ---
-    # png(paste0("Param_Hist_iteration0FULL0_", iteration, ".png"), width = 1200, height = 800)
-    # par(mfrow = c(2, 4))
-    # for (i in 1:8) {
-    #   hist(static_global[i, ], main = paste(param_names[i], "- Iteration", iteration), xlab = "", col = "lightgray", border = "white", cex.main = 2.8,   # main title size
-    #        cex.lab = 2.5,    # axis label size
-    #        cex.axis = 2.3)
-    # }
-    # dev.off()
+     png(paste0("Param_Hist_iteration0FULL0_", iteration, ".png"), width = 1200, height = 800)
+     par(mfrow = c(2, 4))
+     for (i in 1:8) {
+       hist(static_global[i, ], main = paste(param_names[i], "- Iteration", iteration), xlab = "", col = "lightgray", border = "white", cex.main = 2.8,   # main title size
+           cex.lab = 2.5,    # axis label size
+            cex.axis = 2.3)
+     }
+     dev.off()
   }
 print(paste("In the forecast section"))
 
@@ -1420,7 +1375,7 @@ vm_test <- save_vm_ensemble_global[, 1:final_obs_count]
 rt_test = save_rt_ensemble_global[, 1:final_obs_count]
 
 
-#combined_values <- array(NA, dim = c(10000, 52, 3))
+
 combined_values <- array(NA, dim = c(N, final_obs_count, 2))
 # Fill each slice
 combined_values[, , 1] <- vm_test
@@ -1428,7 +1383,7 @@ combined_values[, , 2] <- rt_test
 
 n_forecast_sample = 1000
 
-#JOE mistake found
+
 random_indices <- sample(1:N, n_forecast_sample)
 selected_values <- combined_values[random_indices,, ]
 loop_all_forecast <- vector("list", n_forecast_sample)
@@ -1456,30 +1411,7 @@ selected_values3 <- save_ensemble_full_global[11:18, random_indices, 1:final_obs
     # Forecast for two weeks at a time
     forecast_weeks <- max(df_train_vm$Weeks) + seq(1, 2, by = 1)  # Every two weeks
     df_forecast <- data.frame(Weeks = forecast_weeks)  # Forecasting for two-week intervals
-    # Vm_pred = vector("numeric", length = 2)
-    # rt_pred = vector("numeric", length = 2)
-    # 
-    # Vm_pred[1] = OUproc_func(tail(fitted_vals_vm, 1),
-    #                          mu = ou_mu_vm,
-    #                          lambda = ou_lambda_vm,
-    #                          sigma = ou_sigma_vm)
-    # Vm_pred[2] = OUproc_func(Vm_pred[1],
-    #                          mu = ou_mu_vm,
-    #                          lambda = ou_lambda_vm,
-    #                          sigma = ou_sigma_vm)
-    # 
-    # rt_pred[1] = OUproc_func(tail(fitted_vals_rt, 1),
-    #                          mu = ou_mu_r,
-    #                          lambda = ou_lambda_r,
-    #                          sigma = ou_sigma_r)
-    # rt_pred[2] = OUproc_func(rt_pred[1],
-    #                          mu = ou_mu_r,
-    #                          lambda = ou_lambda_r,
-    #                          sigma = ou_sigma_r)
     
-    # Vm_pred <- rep(tail(fitted_vals_vm, 1), length(forecast_weeks))
-    # rt_pred <- rep(tail(fitted_vals_rt, 1), length(forecast_weeks))
-    # === DAILY CHAINED OU for 2-week forecast (exactly matches old weekly logic) ===
     # Start from the very last fitted value
     current_Vm <- tail(fitted_vals_vm, 1)
     current_rt <- tail(fitted_vals_rt, 1)
@@ -1692,12 +1624,6 @@ results[[iteration]] <- list(
 )
 }
 
-#saveRDS(results, file = paste0("results_FullModel_NoClimate_", Year, ".rds"))
-
-#results <- readRDS(paste0("results_FullModel_NoClimate_", Year, ".rds"))
-
-
-#save_ensemble_full_global = readRDS(paste0("save_ensemble_full_global_FullModel_NoClimate_", Year, ".rds"))
 
 
 
@@ -1983,24 +1909,6 @@ wis_all <- calculate_wis_all_targets(
 )
 
 saveRDS(wis_all, file = paste0("wis_all_FullModel_NoClimate_", Year, ".rds"))
-#wis_all <- readRDS(paste0("wis_all_FullModel_NoClimate_", Year, ".rds")) 
-# 
-# # 2. Summarize WIS
-wis_summary <- summarize_wis_results(wis_all)
-#print(wis_summary)
-# 
-# # 3. Calculate normalized WIS
-normalized_wis <- calculate_normalized_wis_custom(wis_all)
-#print(normalized_wis)
-# 
-# # 4. Visualize
-#plot_wis_custom_results(wis_all, add_dates = TRUE, start_date = forecast_1week_dates[1])
-#plot_wis_summary_custom(wis_summary)
-# 
-# # 5. Access individual components
-#head(wis_all$abundance_1wk)
-#head(wis_all$cases_2wk)
-# 
 
 
 
@@ -2549,7 +2457,7 @@ cat("\nYear", Year, "complete. Results saved.\n")
 
 cat("\nAll years complete.\n")
 #####################################
-## FluSight-Style Fan Chart Plot   ##
+##  Fan Chart Plot   ##
 ## Two-week forward forecast fans  ##
 #####################################
 
@@ -2775,7 +2683,7 @@ p_abundance <- plot_flusight_style(
   model_name           = "FullModel_NoClimate",
   plot_every_n         = 4   # increase (e.g. 4) if fans overlap too much
 )
-print(p_abundance)
+#print(p_abundance)
 # Build actual_df from your variables
 actual_df <- tibble(
   date   = observed_dates,   # all_weeks
@@ -2792,7 +2700,7 @@ p_infected <- plot_flusight_style(
   model_name           = "FullModel_NoClimate",
   plot_every_n         = 4
 )
-print(p_infected)
+#print(p_infected)
 # Build actual_df from your variables
 actual_df <- tibble(
   date   = observed_dates,   # all_weeks
@@ -2808,7 +2716,7 @@ p_cases <- plot_flusight_style(
   model_name           = "FullModel_NoClimate",
   plot_every_n         = 4
 )
-print(p_cases)
+#print(p_cases)
 # Save plot 
 ggsave("f_abundance_FullModel_NoClimate.png", p_abundance, width = 11, height = 6, dpi = 300)
 ggsave("f_infectious_per_1000_FullModel_NoClimate.png", p_infected, width = 11, height = 6, dpi = 300)
@@ -2818,7 +2726,7 @@ ggsave("f_Humancases_FullModel_NoClimate", p_cases, width = 11, height = 6, dpi 
 
 # ============================================================
 # Multi-Year Panel Plotting Script
-# FullModel_NoClimate - Fit + Forecast + FluSight Fan Charts
+# FullModel_NoClimate - Fit + Forecast +  Fan Charts
 # Targets: Total Abundance, Infectious Mosq per 1000, Human Cases
 # Years: 2006-2019, 2021 (15 years total)
 #
@@ -2826,13 +2734,6 @@ ggsave("f_Humancases_FullModel_NoClimate", p_cases, width = 11, height = 6, dpi 
 #       It does NOT re-run the EnKF or forecasting model.
 #       All RDS files must already exist before running this script.
 # ============================================================
-
-library(tidyverse)
-library(dplyr)
-library(purrr)
-library(ggplot2)
-library(gridExtra)
-library(grid)
 
 # ============================================================
 # CONFIGURATION
@@ -2856,8 +2757,7 @@ y_limits_forecast <- list(
 )
 
 # ============================================================
-# EXACT DATA LOADING  -  mirrors your original year-specific
-# data loading block precisely, including all padding logic
+# DATA LOADING  
 # Returns: list(X_obs1, X_obs2, X0_obs, all_weeks,
 #               forecast_1week_dates, forecast_2week_dates)
 # ============================================================
@@ -3214,7 +3114,7 @@ make_forecast_plot <- function(Year, target, horizon, d, apply_ylim) {
   p
 }
 
-# ---- FLUSIGHT fan chart plot --------------------------------
+# ---- fan chart plot --------------------------------
 
 make_fansight_plot <- function(Year, target, d, apply_ylim,
                                plot_every_n = 4) {
