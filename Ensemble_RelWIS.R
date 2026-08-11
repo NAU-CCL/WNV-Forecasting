@@ -1299,7 +1299,117 @@ summary_stats_log <- summary_stats_log %>%
                         .default = model   # keeps all other model names unchanged
   ))
 
+#to rank models calculation
+rank = summary_stats_log %>%
+  filter(target == "Infectious mosq per 1000") %>%
+  group_by(model) %>%
+  summarise(
+    median_relWIS = median(median_rel_wis, na.rm = TRUE),
+    mean_relWIS   = mean(median_rel_wis, na.rm = TRUE),
+    n             = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(median_relWIS)
+rank2 = summary_stats_log %>%
+  filter(target == "Infectious mosq per 1000") %>%
+  group_by(model, horizon) %>%
+  summarise(median_relWIS = median(median_rel_wis, na.rm = TRUE), .groups = "drop") %>%
+  arrange(horizon, median_relWIS)
 
+
+individual_models <- c("Full Model", "FullModel_NoClimate",
+                       "Mosq+Human+Climate", "Mosq+Human+NoClimate")
+
+ensemble_models <- c("Ensemble_model_1", "Ensemble_model_2",
+                     "Ensemble_model_3", "Ensemble_model_4",
+                     "Ensemble_model_5")
+
+# ════════════════════════════════════════════════════════════════
+# 1. "No individual model ranked in top half of all models for
+#    more than 80% of year-target-horizon combinations"
+# ════════════════════════════════════════════════════════════════
+
+# ── (a) Rank among the 4 individual models only ──────────────────
+rank_among_4 <- summary_stats_log %>%
+  filter(model %in% individual_models) %>%
+  group_by(year, target, horizon) %>%
+  mutate(
+    rank_4     = rank(median_rel_wis, ties.method = "average"),
+    n_models_4 = n()
+  ) %>%
+  ungroup()
+
+top_half_4 <- rank_among_4 %>%
+  group_by(model) %>%
+  summarise(
+    n_combinations = n(),                          
+    pct_top_half   = mean(rank_4 <= n_models_4 / 2) * 100,
+    .groups = "drop"
+  ) %>%
+  arrange(desc(pct_top_half))
+
+print(top_half_4)
+
+# ── (b) Rank among all 9 models (4 individual + 5 ensemble) ──────
+rank_among_9 <- summary_stats_log %>%
+  filter(model %in% c(individual_models, ensemble_models)) %>%
+  group_by(year, target, horizon) %>%
+  mutate(
+    rank_9     = rank(median_rel_wis, ties.method = "average"),
+    n_models_9 = n()
+  ) %>%
+  ungroup()
+
+top_half_9 <- rank_among_9 %>%
+  filter(model %in% individual_models) %>%          # only report the 4 individual models' standing
+  group_by(model) %>%
+  summarise(
+    n_combinations = n(),                           
+    pct_top_half   = mean(rank_9 <= n_models_9 / 2) * 100,
+    .groups = "drop"
+  ) %>%
+  arrange(desc(pct_top_half))
+
+print(top_half_9)
+
+cat("Max % top-half, 4-model comparison:", round(max(top_half_4$pct_top_half), 1), "%\n")
+cat("Max % top-half, 9-model comparison:", round(max(top_half_9$pct_top_half), 1), "%\n")
+
+
+# ════════════════════════════════════════════════════════════════
+# 2. Human cases — "[X] of four models... more than two-thirds
+#    of year-horizon combinations" (resolves Option A vs B)
+# ════════════════════════════════════════════════════════════════
+
+human_cases_individual <- summary_stats_log %>%
+  filter(target == "Human cases", model %in% individual_models)
+
+# ── Option A: per-model event rate ────────────────────────────────
+option_A <- human_cases_individual %>%
+  group_by(model) %>%
+  summarise(
+    n_combinations        = n(),                    
+    n_better_than_base    = sum(median_rel_wis < 0),
+    pct_better_than_base  = mean(median_rel_wis < 0) * 100,
+    .groups = "drop"
+  ) %>%
+  arrange(desc(pct_better_than_base))
+
+print(option_A)
+
+n_models_clearing_bar <- sum(option_A$pct_better_than_base > (2/3) * 100)
+cat("Models with >2/3 of combinations better than baseline:",
+    n_models_clearing_bar, "of 4\n")
+
+# ── Option B: pooled statistic across all 4 models combined ──────
+option_B <- human_cases_individual %>%
+  summarise(
+    n_total               = n(),                     
+    n_better_than_base    = sum(median_rel_wis < 0),
+    pct_better_than_base  = mean(median_rel_wis < 0) * 100
+  )
+
+print(option_B)
 model_colors <- c(
   # 4 component models
   "FullModel"               = "#009E73",  # bluish green
@@ -1719,6 +1829,156 @@ for (tgt in names(targets_list)) {
 }
 
 message("All 6 heatmaps have been generated successfully!")
+
+# ============================================================
+# Heatmap: Median Relative WIS by Model x Month — Year 2014
+# Layout: 1 row x 3 columns
+# Col 1: Human Cases
+# Col 2: Infectious Mosq per 1000
+# Col 3: Total Abundance
+# ============================================================
+
+
+years <- c(2006:2019, 2021)
+
+all_data <- map_df(years, function(year) {
+  readRDS(paste0("all_rel_longE_", year, ".rds")) %>%
+    mutate(year = year)
+})
+# ── Build month x model summary for 2014 only ─────────────────────────────────
+heatmap_2014 <- all_data %>%
+  filter(is.finite(rel_wis), year == 2014) %>%
+  mutate(
+    month     = month(time, label = TRUE, abbr = TRUE),
+    month_num = month(time)
+  ) %>%
+  group_by(month, month_num, model, target, horizon) %>%
+  summarise(
+    median_relWIS = median(log(rel_wis), na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    month         = factor(month, levels = month.abb),
+    relWIS_capped = pmax(pmin(median_relWIS, 4.5), -4.5)  # cap at ±3
+  )
+heatmap_2014 <- heatmap_2014 %>%
+  mutate(model = recode(model,
+                        "Full Model" = "FullModel",
+                        "FullModel_NoClimate" = "FullModel_NoWeather",
+                        "Mosq+Human+Climate"           = "Mosq+Human+Weather",
+                        "Mosq+Human+NoClimate"           = "Mosq+Human+NoWeather",
+                        .default = model   # keeps all other model names unchanged
+  ))
+heatmap_2014 <- heatmap_2014 %>%
+  filter(model %in% c("Ensemble_model_4",
+                      "FullModel",
+                      "FullModel_NoWeather",
+                      "Mosq+Human+Weather",
+                      "Mosq+Human+NoWeather"
+  ))
+# ── Set consistent model order ─────────────────────────────────────────────────
+model_order <- c(
+  "Ensemble_model_4",
+  "FullModel",
+  "FullModel_NoWeather",
+  "Mosq+Human+Weather",
+  "Mosq+Human+NoWeather"
+)
+
+# If you have ensemble models too, add them here:
+# model_order <- c(model_order,
+#   "Ensemble_model_1", "Ensemble_model_2", "Ensemble_model_3",
+#   "Ensemble_model_4", "Ensemble_model_5")
+
+heatmap_2014 <- heatmap_2014 %>%
+  mutate(model = factor(model, levels = rev(model_order)))
+# rev() so first model appears at top of y-axis
+
+# ── Target order and labels ────────────────────────────────────────────────────
+target_order <- c("Human cases", "Infectious mosq per 1000", "Total abundance")
+
+target_label_map <- c(
+  `Human cases`         = "Human cases",
+  `Infectious mosq per 1000` = "Infectious mosq per 1000",
+  `Total abundance`     = "Total abundance"
+)
+
+heatmap_2014 <- heatmap_2014 %>%
+  mutate(
+    target = factor(target,
+                    levels  = target_order,
+                    labels  = target_label_map[target_order])
+  )
+
+# ── Build plot ─────────────────────────────────────────────────────────────────
+for (h in c(1, 2)) {
+  
+  horizon_label <- ifelse(h == 1, "1-Week Ahead", "2-Week Ahead")
+  p <- ggplot(
+  heatmap_2014 %>% filter(horizon == h),
+  aes(x = month, y = model, fill = relWIS_capped)
+) +
+  
+  geom_tile(colour = "white", linewidth = 0.4) +
+  
+  # Facet: one column per target, fixed order
+  facet_wrap(
+    ~ target,
+    ncol     = 1,
+    nrow     = 3
+  ) +
+  
+  # Diverging colour scale: blue = better, white = baseline, red = worse
+  scale_fill_gradient2(
+    low      = "#2166ac",
+    mid      = "white",
+    high     = "#d6604d",
+    midpoint = 0,
+    limits   = c(-4.5, 4.5),
+    oob      = scales::squish,
+    name     = "Median\nRelative WIS\n(log scale)",
+    breaks   = c(-4, 0, 4),
+    labels   = c("≥ -4",  "0\n(baseline)",  "≤ 4")
+  ) +
+  
+  labs(
+    title    = paste0("Median Relative WIS — 2014  |  ",
+                      horizon_label),
+    subtitle = paste0(
+      "Blue = better than baseline  |  ",
+      "Red = worse than baseline  |  ",
+      "Each cell = median relative WIS across weeks in that month"
+    ),
+    x = "Month",
+    y = "Model"
+  ) +
+  
+  theme_minimal(base_size = 19) +
+  theme(
+    plot.title       = element_text(face = "bold", size = 19, hjust = 0),
+    plot.subtitle    = element_text(size = 19, colour = "grey40"),
+    strip.text       = element_text(face = "bold", size = 19),
+    axis.text.x      = element_text(angle = 90, hjust = 1, size = 19, face = "bold"),
+    axis.text.y      = element_text(size = 19, face = "bold"),
+    axis.title       = element_text(size = 19, face = "bold"),
+    legend.position  = "right",
+    legend.text      = element_text(size = 19, face = "bold"),
+    legend.title     = element_text(size = 11, face = "bold"),
+    panel.grid       = element_blank(),
+    panel.spacing    = unit(0.6, "lines")
+  )
+
+# ── Save ───────────────────────────────────────────────────────────────────────
+ggsave(
+  filename = paste0("heatmap_2014_relWIS_horizon", h, ".pdf"),
+  plot     = p,
+  width    = 18,
+  height   = 15,
+  dpi      = 300,
+  bg       = "white"
+)
+message("Saved: heatmap_2014_relWIS_horizon", h, ".pdf")
+}
 
 #ensemble 4 exploration
 #  saved files
