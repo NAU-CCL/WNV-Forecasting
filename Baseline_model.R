@@ -68,7 +68,7 @@ if (Year == 2021) {
   column_name <- "rowMeans.combined_temp..na.rm...TRUE."
   inputTem_i <- as.numeric(T_temp[[column_name]])
   inputTem_i <- inputTem_i[1:366]  # 2020 subset (365 days)
-  P_temp <-read.csv("/Users/ko577/county_prcp_2020.csv")
+  P_temp <-read.csv("./county_prcp_2020.csv")
   column_name <- "rowMeans.combined_p..na.rm...TRUE."
   inputTem_i <- as.numeric(T_temp[[column_name]])
   mosq_pools_agg <- read.csv("./mosq_pools_agg_2020.csv")
@@ -93,7 +93,7 @@ if (Year == 2021) {
 }else if (Year == 2019) {
   cat("Loading 2019 data...\n")
   
-  T_temp <-read.csv("/Users/ko577/Downloads/county_temp_2018-2019.csv")
+  T_temp <-read.csv("./county_temp_2018-2019.csv")
   column_name <- "rowMeans.combined_temp..na.rm...TRUE."
   inputTem_i <- as.numeric(T_temp[[column_name]])
   inputTem_i <- inputTem_i[366:730]
@@ -126,12 +126,12 @@ if (Year == 2021) {
 }else if (Year == 2018) {
   cat("Loading 2018 data...\n")
   
-  T_temp <-read.csv("/Users/ko577/Downloads/county_temp_2018-2019.csv")
+  T_temp <-read.csv("./county_temp_2018-2019.csv")
   column_name <- "rowMeans.combined_temp..na.rm...TRUE."
   inputTem_i <- as.numeric(T_temp[[column_name]])
   inputTem_i <- inputTem_i[1:365]
   
-  P_temp <-read.csv("/Users/ko577/Downloads/county_prcp_2018-2019.csv")
+  P_temp <-read.csv("./county_prcp_2018-2019.csv")
   column_name <- "rowMeans.combined_p..na.rm...TRUE."
   inputP_i <- as.numeric(P_temp[[column_name]])
   inputP_i <- inputP_i[1:365]
@@ -163,10 +163,10 @@ if (Year == 2021) {
 }else if (Year == 2017) {
   cat("Loading 2017 data...\n")
   
-  T_temp <-read.csv("/Users/ko577/County_TEMP_2017.csv")
+  T_temp <-read.csv("./County_TEMP_2017.csv")
   T_temp <- as.data.frame(T_temp)
   inputTem_i <- as.numeric(T_temp$row_means[1:365])
-  P_temp <-read.csv("/Users/ko577/County_PRCP_2017.csv")
+  P_temp <-read.csv("./County_PRCP_2017.csv")
   P_temp <- as.data.frame(P_temp)
   inputP_i <- as.numeric(P_temp$row_means[1:365])
   mosq_pools_agg <- read.csv("./mosq_pools_data.csv")
@@ -297,10 +297,10 @@ if (Year == 2021) {
 }else if (Year == 2013) {
   cat("Loading 2013 data...\n")
   
-  T_temp <-read.csv("/Users/ko577/County_TEMP_2013.csv")
+  T_temp <-read.csv("./County_TEMP_2013.csv")
   T_temp <- as.data.frame(T_temp)
   inputTem_i <- as.numeric(T_temp$row_means[1:365])
-  P_temp <-read.csv("/Users/ko577/County_PRCP_2013.csv")
+  P_temp <-read.csv("./County_PRCP_2013.csv")
   P_temp <- as.data.frame(P_temp)
   inputP_i <- as.numeric(P_temp$row_means[1:365])
   mosq_pools_agg <- read.csv("./mosq_pools_data.csv")
@@ -1594,7 +1594,7 @@ plot_data3 <- map_dfr(1:num_iterations, ~ {
     Median = forecast_data[["50%"]]
   )
 })
-
+X0_obs <- X4_obs
 # Observed data for 1-week forecasts
 df_observed_1week <- data.frame(
   Date = forecast_1week_dates,
@@ -1798,7 +1798,7 @@ Q3 <- ggplot() +
   ) +
   scale_x_date(date_breaks = "2 month", date_labels = "%b %Y")
 
-print(Q3)
+#print(Q3)
 
 # 2-WEEK AHEAD - Infectious_Mosq_1000
 plot_data8 <- map_dfr(1:num_iterations, ~ {
@@ -1872,7 +1872,7 @@ Q4 <- ggplot() +
   ) +
   scale_x_date(date_breaks = "2 month", date_labels = "%b %Y")
 
-print(Q4)
+#print(Q4)
 # 1-WEEK AHEAD - Total Abundance
 plot_data5 <- map_dfr(1:num_iterations, ~ {
   forecast_data <- results[[.x]]$total_abundance_q_1
@@ -2025,49 +2025,6 @@ ggsave(paste0("Q3_BASELINE_", iteration, "_", Year, ".png"), plot = Q3, width = 
 ggsave(paste0("Q4_BASELINE_", iteration, "_", Year, ".png"), plot = Q4, width = 10, height = 8, dpi = 300)
 ggsave(paste0("Q5_BASELINE_", iteration, "_", Year, ".png"), plot = Q5, width = 10, height = 8, dpi = 300)
 ggsave(paste0("Q6_BASELINE_", iteration, "_", Year, ".png"), plot = Q6, width = 10, height = 8, dpi = 300)
-
-#Use to rescale quantiles
-
-# scale_forecast_uncertainty <- function(results, factor = 1.2) {
-#   
-#   quantile_fields <- c(
-#     "total_abundance_q_1",
-#     "total_abundance_q_2",
-#     "infectious_per_1000_q_1",
-#     "infectious_per_1000_q_2",
-#     "human_cases_q_1",
-#     "human_cases_q_2"
-#   )
-#   
-#   lapply(results, function(entry) {
-#     for (field in quantile_fields) {
-#       if (!is.null(entry[[field]])) {
-#         q        <- entry[[field]]
-#         median_q <- q["50%"]
-#         
-#         # Only scale quantiles that are strictly above zero
-#         nonzero  <- q > 0
-#         scaled   <- q  # start with original
-#         scaled[nonzero] <- (q[nonzero] - median_q) * factor + median_q
-#         
-#         # Safety clamp in case any nonzero quantile still goes negative
-#         # (can happen if median itself is very small)
-#         scaled <- pmax(scaled, 0)
-#         
-#         entry[[field]] <- scaled
-#       }
-#     }
-#     entry
-#   })
-# }
-# 
-# # Usage
-# scaled_results <- scale_forecast_uncertainty(results, factor = 1.2)
-# 
-# saveRDS(scaled_results, file = paste0("scaled_results_BaselineModel_", Year, ".rds"))
-# 
-# 
-# results <- readRDS(paste0("scaled_results_BaselineModel_", Year, ".rds")) #ALWAYS RUN THIS 
 
 
 #####################################
@@ -2350,27 +2307,8 @@ wis_all <- calculate_wis_all_targets(
                       0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 
                       0.95, 0.975, 0.99)
 )
-#saveRDS(wis_all, file = paste0("wis_all_ScaledBaselineModel_", Year, ".rds"))
-saveRDS(wis_all, file = paste0("wis_all_BaselineModel_", Year, ".rds"))
 
-#wis_all <- readRDS(paste0("wis_all_BaselineModel_", Year, ".rds")) 
-# 
-# # 2. Summarize WIS
-#wis_summary <- summarize_wis_results(wis_all)
-#print(wis_summary)
-# 
-# # 3. Calculate normalized WIS
-#normalized_wis <- calculate_normalized_wis_custom(wis_all)
-#print(normalized_wis)
-# 
-# # 4. Visualize
-#plot_wis_custom_results(wis_all, add_dates = TRUE, start_date = forecast_1week_dates[1])
-#plot_wis_summary_custom(wis_summary)
-# 
-# # 5. Access individual components
-#head(wis_all$abundance_1wk)
-#head(wis_all$cases_2wk)
-# 
+saveRDS(wis_all, file = paste0("wis_all_BaselineModel_", Year, ".rds"))
 }
 # ============================================================
 # Baseline WIS heatmap
@@ -2997,7 +2935,7 @@ ggsave("baseline_WIS_by_month.pdf",
 
 # ============================================================
 # Multi-Year Panel Plotting Script
-# Baseline Model - Forecast + FluSight Fan Charts
+# Baseline Model - Forecast + Fan Charts
 # Targets: Total Abundance, Infectious Mosq per 1000, Human Cases
 # Years: 2006-2019, 2021 (15 years total)
 #
@@ -3015,13 +2953,12 @@ model_name <- "BaselineModel"
 
 y_limits_forecast <- list(
   total_abundance     = c(0, 6500),
-  infectious_per_1000 = c(0, 40),    # <-- wider for forecast/fansight
+  infectious_per_1000 = c(0, 40),    
   human_cases         = c(0, 400)
 )
 
 # ============================================================
-# EXACT DATA LOADING  -  mirrors your original year-specific
-# data loading block precisely, including all padding logic
+# DATA LOADING  
 # Returns: list(X_obs1, X_obs2, X0_obs, all_weeks,
 #               forecast_1week_dates, forecast_2week_dates)
 # ============================================================
@@ -3306,7 +3243,7 @@ make_forecast_plot <- function(Year, target, horizon, d, apply_ylim) {
   p
 }
 
-# ---- FLUSIGHT fan chart plot --------------------------------
+# ---- fan chart plot --------------------------------
 
 make_fansight_plot <- function(Year, target, d, apply_ylim,
                                plot_every_n = 4) {
