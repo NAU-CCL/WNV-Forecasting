@@ -2844,10 +2844,10 @@ ggsave("median_month_fit.pdf", median_month , width = 16, height = 15, dpi = 300
 
 
 # ============================================================
-# Heatmap: Median Relative WIS by Model x Month, faceted by Year
+# Heatmap: Median  WIS by Model x Month, faceted by Year
 # Y-axis: model names
 # X-axis: calendar month (Jan-Dec)
-# Fill:   median relative WIS (blue = better, red = worse)
+# Fill:   median  WIS (lighter = better, darker = worse)
 # Facet:  one panel per year (15 years)
 # ============================================================
 years <- c(2006:2019, 2021)
@@ -2894,17 +2894,17 @@ heatmap_data <- all_data %>%
   ) %>%
   group_by(year, month, month_num, model, target) %>%
   summarise(
-    median_relWIS = median(WIS, na.rm = TRUE),
+    median_WIS = median(WIS, na.rm = TRUE),
     .groups = "drop"
   ) %>%
   mutate(
     month = factor(month, levels = month.abb),
     # Cap extreme values for colour scale readability
-    relWIS_capped = pmax(pmin(median_relWIS, 500), 0)
+    WIS_capped = pmax(pmin(median_WIS, 500), 0)
   )
 # ── Compute per-target limits ─────────────────────────────────────
 target_scales <- heatmap_data %>%
-  mutate(WIS = median_relWIS) %>%  
+  mutate(WIS = median_WIS) %>%  
   group_by(target) %>%
   summarise(
     lo  = quantile(WIS, 0.05, na.rm = TRUE),  # 5th percentile — ignore low outliers
@@ -2914,14 +2914,14 @@ target_scales <- heatmap_data %>%
 heatmap_data <- heatmap_data %>%
   left_join(target_scales, by = "target") %>%
   mutate(
-    relWIS_capped = pmax(pmin(median_relWIS, hi), lo)
+    WIS_capped = pmax(pmin(median_WIS, hi), lo)
   )
 # ── Updated plot function ──────────────────────────────────────────────────────
 plot_heatmap_by_year <- function(target_name, target_label) {
   
   plot_df <- heatmap_data %>%
     filter(target == target_name) %>%
-    mutate(WIS = median_relWIS)
+    mutate(WIS = median_WIS)
   
   scale_params <- target_scales %>% filter(target == target_name)
   lo <- scale_params$lo
@@ -2929,7 +2929,7 @@ plot_heatmap_by_year <- function(target_name, target_label) {
   
   # Cap to [lo, hi] so outliers don't dominate
   plot_df <- plot_df %>%
-    mutate(fill_val =relWIS_capped)
+    mutate(fill_val =WIS_capped)
   
   model_order <- rev(sort(unique(plot_df$model)))
   plot_df <- plot_df %>%
