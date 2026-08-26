@@ -1,6 +1,5 @@
 ##############################
 # ENSEMBLE MODEL
-install.packages("patchwork")
 library(patchwork)
 library(tidyverse)
 library(nloptr)
