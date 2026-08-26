@@ -1572,7 +1572,8 @@ saveRDS(results_baseline, file = paste0("results_BaselineModel_", Year, ".rds"))
 
 
 results <- readRDS(paste0("results_BaselineModel_", Year, ".rds")) #ALWAYS RUN THIS 
-
+num_iterations <- length(results)   
+iteration      <- num_iterations    
 # 1-WEEK AHEAD - Human Cases
 plot_data3 <- map_dfr(1:num_iterations, ~ {
   forecast_data <- results[[.x]]$human_cases_q_1
