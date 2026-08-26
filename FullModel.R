@@ -4652,7 +4652,7 @@ final_fit <- arrangeGrob(
   ncol    = 1,
   heights = unit(c(14, 1.5), c("cm", "cm"))
 )
-
+saveRDS(final_fit, "final_fit_2014_FullModel.rds")
 ggsave(
   filename = paste0("plot_2014_fit_3panel_", model_name, ".png"),
   plot     = final_fit,
@@ -4724,7 +4724,7 @@ final_combined <- arrangeGrob(
   ncol    = 1,
   heights = unit(c(20, 2.8), c("cm", "cm"))
 )
-
+saveRDS(final_combined, "final_combined_2014_FullModel.rds")
 ggsave(
   filename = paste0("plot_2014_fansight_fc2wk_2x3_", model_name, ".png"),
   plot     = final_combined,
