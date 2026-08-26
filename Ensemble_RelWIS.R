@@ -644,7 +644,7 @@ compute_wis_vec <- function(q_matrix, actuals) {
 }
 
 # ============================================================
-BUILD ENSEMBLE QUANTILE MATRICES (all iterations)
+#BUILD ENSEMBLE QUANTILE MATRICES (all iterations)
 # ============================================================
 
 build_ens_avg <- function(q_array) {
@@ -737,7 +737,7 @@ build_ens_wis <- function(q_array, actuals) {
 }
 
 # ============================================================
-CONVERT TO WEEKLY WIS TIBBLE WITH DATES
+#CONVERT TO WEEKLY WIS TIBBLE WITH DATES
 # ============================================================
 
 ensemble_to_weekly_wis <- function(ens_q_matrix, actuals, target_key,
@@ -769,7 +769,7 @@ ensemble_to_weekly_wis <- function(ens_q_matrix, actuals, target_key,
 }
 
 # ============================================================
-MAIN FUNCTION — ALL DATA, NO SPLIT
+#MAIN FUNCTION — ALL DATA, NO SPLIT
 # ============================================================
 
 run_ensembles_all_data <- function(year, obs_list, observed_dates) {
