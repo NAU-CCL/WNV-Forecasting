@@ -1360,7 +1360,7 @@ S12 <- ggplot() +
     #ggsave(paste0("A35_iteration0FULL0_", iteration, ".png"), plot = p1, width = 10, height = 8, dpi = 300)
     ggsave(paste0("A36_iteration0FULL0_", iteration, "_", Year, ".png"), plot = p2, width = 10, height = 8, dpi = 300)
     # --- Parameter histograms ---
-     png(paste0("Param_Hist_iteration0FULL0_", iteration, ".png"), width = 1200, height = 800)
+     png(paste0("Param_Hist_iteration0FULL0_", iteration, "_", Year, ".png"), width = 1200, height = 800)
      par(mfrow = c(2, 4))
      for (i in 1:8) {
        hist(static_global[i, ], main = paste(param_names[i], "- Iteration", iteration), xlab = "", col = "lightgray", border = "white", cex.main = 2.8,   # main title size
