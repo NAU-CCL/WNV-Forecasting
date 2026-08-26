@@ -1,3 +1,4 @@
+library(patchwork)
 #Full Model
 years_to_run <- c(2006:2019, 2021)
 for (Year in years_to_run) {
@@ -2682,8 +2683,10 @@ print(mean_plot)
 ggsave("median_h2_fit.png", median_plot, width = 16, height = 15, dpi = 300)
 ggsave("median_h2_fit.pdf", median_plot, width = 16, height = 15, dpi = 300)
 
-combined <- (median_plot/final_fit) 
+#combined <- (median_plot/final_fit) 
 
+final_fit <- readRDS("final_fit_2014_FullModel.rds")   
+combined  <- (median_plot / wrap_elements(final_fit))
 ggsave(
   filename = "median_plot_final_fit_all_targets_2014.png",
   plot     = combined,
