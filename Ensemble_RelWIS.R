@@ -2022,7 +2022,7 @@ ensemble4_monthly <- map_dfr(names(ensemble4_files), function(model_name) {
 
 print(ensemble4_monthly)
 
-
+baseline_join <- readRDS("baseline_joinWIS.rds")  
 ensemble4_relwis_monthly <- ensemble4_monthly %>%
   left_join(baseline_join, by = c("year", "horizon", "target", "iteration")) %>%
   filter(is.finite(WIS), is.finite(WIS_baseline), WIS_baseline > 0) %>%
