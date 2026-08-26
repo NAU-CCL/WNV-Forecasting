@@ -3514,3 +3514,67 @@ for (tgt in targets) {
 }
 
 message("\nAll 12 panels complete.")
+years <- c(2006:2019, 2021)
+model_files <- list(
+  "FullModel"            = "wis_all_FullModel_",
+  "FullModel_NoWeather"   = "wis_all_FullModel_NoClimate_",
+  "Mosq+Human+Weather"    = "wis_all_Mosq+Human+Climate_",
+  "Mosq+Human+NoWeather"  = "wis_all_Mosq+Human+NoClimate_"
+)
+
+# ── Build per-iteration model WIS with forecast date ───────────────────────────
+model_wis_monthly <- map_dfr(names(model_files), function(model_name) {
+  map_dfr(years, function(yr) {
+    fpath <- paste0(model_files[[model_name]], yr, ".rds")
+    if (!file.exists(fpath)) return(NULL)
+    lis <- readRDS(fpath)
+    
+    bind_rows(
+      lis$abundance_1wk %>% mutate(horizon = 1, target = "Total abundance"),
+      lis$abundance_2wk %>% mutate(horizon = 2, target = "Total abundance"),
+      lis$infected_1wk  %>% mutate(horizon = 1, target = "Infectious mosq per 1000"),
+      lis$infected_2wk  %>% mutate(horizon = 2, target = "Infectious mosq per 1000"),
+      lis$cases_1wk     %>% mutate(horizon = 1, target = "Human cases"),
+      lis$cases_2wk     %>% mutate(horizon = 2, target = "Human cases")
+    ) %>%
+      mutate(
+        year          = yr,
+        model         = model_name,
+        forecast_week = if_else(horizon == 1, iteration + 5, iteration + 6),
+        forecast_date = as.Date(paste0(yr, "-01-01")) + (forecast_week - 1) * 7
+      ) %>%
+      select(year, model, horizon, target, iteration, WIS, forecast_date)
+  })
+})
+
+# ── Join with baseline WIS per same iteration (reuse your existing baseline_all) ──
+baseline_join <- baseline_all %>%
+  select(year, horizon, target, iteration, WIS_baseline = WIS)
+saveRDS(baseline_join, "baseline_joinWIS.rds")   
+relwis_monthly <- model_wis_monthly %>%
+  left_join(baseline_join, by = c("year", "horizon", "target", "iteration")) %>%
+  filter(is.finite(WIS), is.finite(WIS_baseline), WIS_baseline > 0) %>%
+  mutate(
+    rel_wis = log(WIS / WIS_baseline),
+    month   = month(forecast_date, label = TRUE, abbr = TRUE),
+    season  = case_when(
+      month %in% c("Jan","Feb","Mar") ~ "Winter",
+      month %in% c("Apr","May","Jun") ~ "Spring",
+      month %in% c("Jul","Aug","Sep") ~ "Summer",
+      month %in% c("Oct","Nov","Dec") ~ "Fall"
+    )
+  )
+
+# ── Median relative WIS by model x target x season ──────────────────────────────
+season_summary <- relwis_monthly %>%
+  group_by(model, target, season) %>%
+  summarise(median_relWIS = median(rel_wis, na.rm = TRUE), n = n(), .groups = "drop") %>%
+  arrange(target, model, season)
+print(season_summary, n = 200)
+
+# ── Median relative WIS by model x target x month (finer detail if needed) ─────
+monthly_summary <- relwis_monthly %>%
+  group_by(model, target, month) %>%
+  summarise(median_relWIS = median(rel_wis, na.rm = TRUE), n = n(), .groups = "drop") %>%
+  arrange(target, model, month)
+print(monthly_summary, n = 200)
