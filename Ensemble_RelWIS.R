@@ -1501,6 +1501,7 @@ summary_stats_log <- summary_stats_log %>%
                       "Mosq+Human+Weather",
                       "Mosq+Human+NoWeather"
                       ))
+saveRDS(summary_stats_log, "summary_stats_log_relWIS.rds")   # reused by Mosq_Human.R / Mosq_Human_NoW.R
 # Generate plots
 mean_h1 <- plot_boxplots(summary_stats_log, stat_type = "mean", horizon_num = 1)
 mean_h2 <- plot_boxplots(summary_stats_log, stat_type = "mean", horizon_num = 2)
@@ -1522,9 +1523,11 @@ ggsave("median_h2.pdf", median_h2, width = 16, height = 10, dpi = 300)
 #saving when i dont filter
 ggsave("median_h1_full.pdf", median_h1, width = 16, height = 10, dpi = 300)
 ggsave("median_h2_full.pdf", median_h2, width = 16, height = 10, dpi = 300)
-library(patchwork)
-combined <- (median_h2/final_combined) 
 
+#combined <- (median_h2/final_combined) 
+
+final_combined <- readRDS("final_combined_2014_FullModel.rds")  
+combined <- (median_h2 / wrap_elements(final_combined))
 ggsave(
   filename = "median_plot_final_forecast_all_targets_2014.png",
   plot     = combined,
@@ -1541,9 +1544,10 @@ ggsave(
   dpi      = 300,
   bg       = "white"
 )
-
-
+median_plot <- readRDS("median_plot_fit.rds")   # created by Fit_WIS.R
 median_plot / median_h2
+
+#median_plot / median_h2
 
 #box plots by months
 
