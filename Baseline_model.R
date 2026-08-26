@@ -97,7 +97,7 @@ if (Year == 2021) {
   column_name <- "rowMeans.combined_temp..na.rm...TRUE."
   inputTem_i <- as.numeric(T_temp[[column_name]])
   inputTem_i <- inputTem_i[366:730]
-  P_temp <-read.csv("/Users/ko577/Downloads/county_prcp_2018-2019.csv")
+  P_temp <-read.csv("./county_prcp_2018-2019.csv")
   column_name <- "rowMeans.combined_p..na.rm...TRUE."
   inputP_i <- as.numeric(P_temp[[column_name]])
   inputP_i <- inputP_i[366:730]
