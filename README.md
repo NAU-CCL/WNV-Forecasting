@@ -13,7 +13,7 @@ Each script fits and forecasts one of the four model configurations using the En
 | `FullModel.R` | Model 1: mosquito + bird + human, **with** weather forcing. |
 | `FullModel_NoW.R` | Model 2: mosquito + bird + human, **without** weather forcing. Mosquito growth follows the time-varying rate $\nu_M(t)$ alone. |
 | `Mosq_Human.R` | Model 3: mosquito + human only, **with** weather forcing. Omits the avian compartment; bird-to-mosquito force of infection is estimated as a time-varying parameter $f(t)$. |
-| `Mosq_Human_NoW.R` | Model 4: mosquito + human only, **without** weather forcing. The most parsimonious configuration; serves as the mechanistic baseline. |
+| `Mosq_Human_NoW.R` | Model 4: mosquito + human only, **without** weather forcing. The most parsimonious configuration. |
 
 ### Evaluation scripts
 
