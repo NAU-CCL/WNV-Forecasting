@@ -3486,7 +3486,7 @@ cat("Range across years/models:",
 
 #precipitation patters in Mosq+Human+Climate, Mosq+Human+NoClimate
 
-library(dplyr)
+summary_stats_log <- readRDS("summary_stats_log_relWIS.rds")   # created by Ensemble_RelWIS.R
 
 # ── Years where Model 3 or Model 4 had relative WIS > 0 (worse than baseline) for IM1000 ──
 underperform_years <- summary_stats_log %>%
