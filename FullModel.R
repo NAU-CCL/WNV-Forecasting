@@ -2878,7 +2878,7 @@ print(p_cases)
 # Save plot 
 ggsave("f_abundance_FullModel.png", p_abundance, width = 11, height = 6, dpi = 300)
 ggsave("f_infectious_per_1000_FullModel.png", p_infected, width = 11, height = 6, dpi = 300)
-ggsave("f_Humancases_FullModel", p_cases, width = 11, height = 6, dpi = 300)
+ggsave("f_Humancases_FullModel.png", p_cases, width = 11, height = 6, dpi = 300)
 
 
 
