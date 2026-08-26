@@ -1,6 +1,7 @@
 ##############################
 # ENSEMBLE MODEL
-
+install.packages("patchwork")
+library(patchwork)
 library(tidyverse)
 library(nloptr)
 library(epipredict)  # for quantile_pred and weighted_interval_score
@@ -1541,8 +1542,7 @@ ggsave(
   bg       = "white"
 )
 
-install.packages("patchwork")
-library(patchwork)
+
 median_plot / median_h2
 
 #box plots by months
