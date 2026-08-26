@@ -3842,7 +3842,7 @@ raw_wis_by_year %>%
   arrange(desc(median_absolute_WIS)) %>%
   print(n = 20)
 
-
+summary_stats_log <- readRDS("summary_stats_log_relWIS.rds")   # created by Ensemble_RelWIS.R
 
 individual_models <- c("FullModel", "FullModel_NoWeather",
                        "Mosq+Human+Weather", "Mosq+Human+NoWeather")
