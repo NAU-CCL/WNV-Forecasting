@@ -1102,11 +1102,11 @@ run_linear_pool <- function(year, obs_list, observed_dates, weights = NULL) {
   wis_list       <- map(results_by_target, ~ .$weekly_wis)
   names(wis_list) <- map_chr(results_by_target, ~ .$wis_name)
   
-  cat("\n--- Linear Pool Summary ---\n")
-  print(summarize_wis_results(wis_list))
+  #cat("\n--- Linear Pool Summary ---\n")
+  #print(summarize_wis_results(wis_list))
   
-  cat("\n--- Normalised WIS ---\n")
-  print(calculate_normalized_wis_custom(wis_list))
+  #cat("\n--- Normalised WIS ---\n")
+  #print(calculate_normalized_wis_custom(wis_list))
   
   list(year = year, wis_LinearPool = wis_list)
 }
