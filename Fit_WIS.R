@@ -2682,7 +2682,7 @@ print(median_plot)
 print(mean_plot)
 ggsave("median_h2_fit.png", median_plot, width = 16, height = 15, dpi = 300)
 ggsave("median_h2_fit.pdf", median_plot, width = 16, height = 15, dpi = 300)
-
+saveRDS(median_plot, "median_plot_fit.rds")   # reused by Ensemble_RelWIS.R
 #combined <- (median_plot/final_fit) 
 
 final_fit <- readRDS("final_fit_2014_FullModel.rds")   
