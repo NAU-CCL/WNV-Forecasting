@@ -1406,6 +1406,16 @@ for (iteration in 1:num_iterations) {
     ggsave(paste0("A9_iteration_", iteration, "_", Year, ".png"), plot = S9, width = 10, height = 8, dpi = 300)
     #ggsave(paste0("A35_iteration_", iteration, ".png"), plot = p1, width = 10, height = 8, dpi = 300)
     ggsave(paste0("A36_iteration_", iteration, "_", Year, ".png"), plot = p2, width = 10, height = 8, dpi = 300)
+    # --- Parameter histograms ---
+    png(paste0("Param_Hist_iteration_", iteration, "_", Year, ".png"), width = 1200, height = 800)
+    par(mfrow = c(3, 2))
+    for (i in 1:6) {
+      hist(static_global[i, ], main = paste(param_names[i]), xlab = "", col = "lightgray", border = "white", cex.main = 2.8,   # main title size
+           cex.lab = 2.5,    # axis label size
+           cex.axis = 2.3)
+    }
+     dev.off()
+     message("Parameter histograms saved for year ", Year)
   }
   print(paste("In the forecast section"))
   
