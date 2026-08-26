@@ -1494,19 +1494,19 @@ plot_boxplots <- function(data, stat_type = "mean", horizon_num = 1, color_map =
   return(p)
 }
 #if i want to filter
-summary_stats_log <- summary_stats_log %>%
+# Five-model subset for the main figures; the unfiltered data stay in summary_stats_log
+summary_stats_log_5 <- summary_stats_log %>%
   filter(model %in% c("Ensemble_model_4",
                       "FullModel",
                       "FullModel_NoWeather",
                       "Mosq+Human+Weather",
-                      "Mosq+Human+NoWeather"
-                      ))
+                      "Mosq+Human+NoWeather"))
 saveRDS(summary_stats_log, "summary_stats_log_relWIS.rds")   # reused by Mosq_Human.R / Mosq_Human_NoW.R
 # Generate plots
-mean_h1 <- plot_boxplots(summary_stats_log, stat_type = "mean", horizon_num = 1)
-mean_h2 <- plot_boxplots(summary_stats_log, stat_type = "mean", horizon_num = 2)
-median_h1 <- plot_boxplots(summary_stats_log, stat_type = "median", horizon_num = 1)
-median_h2 <- plot_boxplots(summary_stats_log, stat_type = "median", horizon_num = 2)
+mean_h1   <- plot_boxplots(summary_stats_log_5, stat_type = "mean",   horizon_num = 1)
+mean_h2   <- plot_boxplots(summary_stats_log_5, stat_type = "mean",   horizon_num = 2)
+median_h1 <- plot_boxplots(summary_stats_log_5, stat_type = "median", horizon_num = 1)
+median_h2 <- plot_boxplots(summary_stats_log_5, stat_type = "median", horizon_num = 2)
 
 # Display plots
 print(mean_h1)
@@ -1521,8 +1521,11 @@ ggsave("median_h1.pdf", median_h1, width = 16, height = 10, dpi = 300)
 ggsave("median_h2.pdf", median_h2, width = 16, height = 10, dpi = 300)
 
 #saving when i dont filter
-ggsave("median_h1_full.pdf", median_h1, width = 16, height = 10, dpi = 300)
-ggsave("median_h2_full.pdf", median_h2, width = 16, height = 10, dpi = 300)
+# Unfiltered versions (all nine models)
+median_h1_full <- plot_boxplots(summary_stats_log, stat_type = "median", horizon_num = 1)
+median_h2_full <- plot_boxplots(summary_stats_log, stat_type = "median", horizon_num = 2)
+ggsave("median_h1_full.pdf", median_h1_full, width = 16, height = 10, dpi = 300)
+ggsave("median_h2_full.pdf", median_h2_full, width = 16, height = 10, dpi = 300)
 
 #combined <- (median_h2/final_combined) 
 
@@ -1651,17 +1654,17 @@ individual_points_log <- individual_points_log %>%
                         .default = model   # keeps all other model names unchanged
   ))
 #if i want to filter
-individual_points_log <- individual_points_log %>%
+individual_points_log_5 <- individual_points_log %>%
   filter(model %in% c("Ensemble_model_4",
                       "FullModel",
                       "Mosq+Human+Weather",
                       "Mosq+Human+NoWeather",
                       "FullModel_NoWeather"))
 
-median_h1_month <- plot_boxplots_by_month(individual_points_log, stat_type = "median", horizon_num = 1)
-median_h2_month <- plot_boxplots_by_month(individual_points_log, stat_type = "median", horizon_num = 2)
-mean_h1_month <- plot_boxplots_by_month(individual_points_log, stat_type = "mean", horizon_num = 1)
-mean_h2_month <- plot_boxplots_by_month(individual_points_log, stat_type = "mean", horizon_num = 2)
+median_h1_month <- plot_boxplots_by_month(individual_points_log_5, stat_type = "median", horizon_num = 1)
+median_h2_month <- plot_boxplots_by_month(individual_points_log_5, stat_type = "median", horizon_num = 2)
+mean_h1_month <- plot_boxplots_by_month(individual_points_log_5, stat_type = "mean", horizon_num = 1)
+mean_h2_month <- plot_boxplots_by_month(individual_points_log_5, stat_type = "mean", horizon_num = 2)
 
 # Display
 print(median_h1_month)
@@ -1672,8 +1675,11 @@ print(mean_h2_month)
 ggsave("log_median_rel_wis_by_month_horizon1.pdf", median_h1_month, width = 14, height = 16, dpi = 300)
 ggsave("log_median_rel_wis_by_month_horizon2.pdf", median_h2_month, width = 14, height = 16, dpi = 300)
 # Save when I dont filter
-ggsave("log_median_rel_wis_by_month_horizon1_full.pdf", median_h1_month, width = 16, height = 16, dpi = 300)
-ggsave("log_median_rel_wis_by_month_horizon2_full.pdf", median_h2_month, width = 16, height = 16, dpi = 300)
+# Unfiltered versions (all nine models)
+median_h1_month_full <- plot_boxplots_by_month(individual_points_log, stat_type = "median", horizon_num = 1)
+median_h2_month_full <- plot_boxplots_by_month(individual_points_log, stat_type = "median", horizon_num = 2)
+ggsave("log_median_rel_wis_by_month_horizon1_full.pdf", median_h1_month_full, width = 16, height = 16, dpi = 300)
+ggsave("log_median_rel_wis_by_month_horizon2_full.pdf", median_h2_month_full, width = 16, height = 16, dpi = 300)
 
 
 ggsave("log_mean_rel_wis_by_month_horizon1.pdf", mean_h1_month, width = 14, height = 16, dpi = 300)
