@@ -4735,3 +4735,117 @@ ggsave(
 )
 message("Saved: plot_2014_fansight_fc2wk_2x3_", model_name, ".png")
 message("All 2014 plots complete.")
+
+# Ploting the temperature function
+# 2016 daily temperature and precipitation (rows 731:1096 = 1 Jan – 31 Dec 2016)
+T_temp     <- read.csv("./county_temp.csv")
+inputTem_i <- as.numeric(T_temp[["rowMeans.combined_temp..na.rm...TRUE."]])[731:1096]
+
+P_temp     <- read.csv("./county_prcp.csv")
+inputP_i   <- as.numeric(P_temp[["rowMeans.combined_p..na.rm...TRUE."]])[731:1096]
+# parameters
+Tmi <- 21.1   # minimum temp threshold
+Tma <- 46   # maximum temp threshold
+par <- c(Tmi, Tma)
+# observed  temperatures
+inputTem_i <- inputTem_i[1:366]
+T_temp<- inputTem_i
+# your inputTem function
+inputTem <- function(time_points, par, inputTem_i) {
+  temp <- inputTem_i[time_points]
+  if (temp < par[1] | temp > par[2]) {
+    return(par[1])   # clip to Tmi if outside range
+  } else {
+    return(temp)
+  }
+}
+# apply clipping to all time points
+time_points <- seq_along(inputTem_i)
+temps_clipped <- sapply(time_points, function(tp) inputTem(tp, par, inputTem_i))
+# compute the response function using clipped temps
+f_T <- -(temps_clipped - Tmi) * (temps_clipped - Tma)
+# put into dataframe
+df <- data.frame(
+  Temperature = T_temp,
+  Response = f_T,
+  x = time_points
+)
+# plot
+TT = ggplot(df, aes(x = Temperature, y = Response)) +
+  geom_line(color = "black", linewidth = 1) +
+  #geom_vline(xintercept = c(Tmi, Tma), linetype = "dashed", color = "red") +
+  labs(
+    title = expression(paste("Temperature Response:  - (T - T"[min], ")(T - T"[max], ")")),
+    x = "Temperature (°C)",
+    y = "Response"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "top",
+    axis.title = element_text(size = 18),
+    axis.text = element_text(size = 18),
+    legend.text = element_text(size = 11),
+    plot.title = element_text(size = 11)
+  )
+TT2 = ggplot(df, aes(x = x, y = Response)) +
+  geom_line(color = "black", linewidth = 1) +
+  #geom_vline(xintercept = c(Tmi, Tma), linetype = "dashed", color = "red") +
+  labs(
+    #title = expression(paste("Temperature Response:  - (T - T"[min], ")(T - T"[max], ")")),
+    x = "Time (days)",
+    y = "Response"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "top",
+    axis.title = element_text(size = 18),
+    axis.text = element_text(size = 18),
+    legend.text = element_text(size = 11),
+    plot.title = element_text(size = 11)
+  )
+# parameters
+alpha <- 1.48     # intercept
+phi   <- 1.37  # slope
+# precipitation range (mm)
+P_temp <- inputP_i[1:366]
+# compute function
+f_P <- 1 / (1 + exp(alpha - phi * P_temp))
+# dataframe
+df2 <- data.frame(
+  Precipitation = P_temp,
+  Response = f_P,
+  x = time_points
+)
+# plot
+PP = ggplot(df2, aes(x = Precipitation, y = Response)) +
+  geom_line(color = "black", linewidth = 1) +
+  labs(
+    title = expression(paste("Precipitation Response:  1 / (1 + e^{", alpha, " - ", phi, " P})")),
+    x = "Precipitation (mm)",
+    y = "Response"
+  ) +
+  theme_minimal()+
+  theme(
+    legend.position = "top",
+    axis.title = element_text(size = 18),
+    axis.text = element_text(size = 18),
+    legend.text = element_text(size = 11),
+    plot.title = element_text(size = 11)
+  )
+PP2 = ggplot(df2, aes(x = x, y = Response)) +
+  geom_line(color = "black", linewidth = 1) +
+  labs(
+    #title = expression(paste("Precipitation Response:  1 / (1 + e^{", alpha, " - ", phi, " P})")),
+    x = "Time (days)",
+    y = "Response"
+  ) +
+  theme_minimal()+
+  theme(
+    legend.position = "top",
+    axis.title = element_text(size = 18),
+    axis.text = element_text(size = 18),
+    legend.text = element_text(size = 11),
+    plot.title = element_text(size = 11)
+  )
+S49 <- (TT | PP) / (TT2 | PP2)
+ggsave("PRCP_TEMP_RESPONSE_2016.pdf", S49, width = 14, height = 10, bg = "white")
