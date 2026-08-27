@@ -844,7 +844,7 @@ Vm_t_particles <- runif(N, min = 0.0001, max = 7)
 log_Vm_t_particles <- log(Vm_t_particles)
 r_t_particles <- runif(N, min = 0.0001, max = 0.001)
 log_r_t_particles <- log(r_t_particles)
-f_t_particles <-runif(N, min = 0, max = 0.001)
+f_t_particles <-runif(N, min = 0.0001, max = 0.001)
 log_f_t_particles <- log(f_t_particles)
 # Static parameters
 Tmi_particles <- runif(N, min = 17, max = 20)
